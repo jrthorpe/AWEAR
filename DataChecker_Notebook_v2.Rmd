@@ -13,7 +13,7 @@ looks as expected. The R script imports, tests and plots data from a specified p
 ```{r SETUP, include=FALSE}
 # Set the drive, load packages and functions.
 
-setwd("M:/PhD_Folder/CaseStudies/Data_analysis")
+setwd("M:/PhD_Folder/CaseStudies/Data_analysis/source")
 
 # Load required packages:
 library(data.table)
@@ -34,7 +34,7 @@ library(caTools)
 source("JRT_utils.R")
 
 # Define constants:
-folder <- "../Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
+folder <- "../../Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
 not.in.use <- c("bluetooth","hardware_info","wearable","wifi")
 activity.selection <- c("Still", "Foot", "Vehicle", "Tilting", "Bicycle") # main activity types
 to_plot <- c("activity", 
@@ -62,7 +62,7 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 ```{r Settings, echo=FALSE}
 
 # Select user
-userid <- users$P06SS
+userid <- users$P10JL
 
 # Set period of interest
 d.start <- as.POSIXct("2018-03-19") # yyyy-mm-dd 
@@ -98,6 +98,9 @@ The output below confirms which files have been imported, followed by processing
 datasets.all <- get.data(folder, not.in.use) %>% 
   lapply(restructure, userid, d.start, d.stop)
 datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any null dataframes
+
+#test<-filter(datasets.all$activity, user=="f9f24838-c844-42d4-8343-b20ebdd220f3")
+
 ```
 
 

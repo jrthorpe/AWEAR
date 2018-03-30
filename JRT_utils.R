@@ -65,7 +65,7 @@ restructure <- function(dat, userid, d.start, d.stop) {
   # Extract only the period of interest:
   if(d.start <= max(dat$timestamp) & d.stop >= min(dat$timestamp)){ #checks whether the period of interest overlaps with the timeframe in the dataset
     dat %<>% 
-      mutate(timestamp=as.POSIXct(timestamp)) %>% #NOTE: this just puts it into CEST format which is not correct, need to fix
+      mutate(timestamp=as.POSIXct(timestamp,format="%Y-%m-%d %H:%M:%S")) %>% #NOTE: this just puts it into CEST format which is not correct, need to fix
       filter(timestamp>=d.start, timestamp<=d.stop) %>%
       arrange(timestamp)
     cat("Complete: Data extracted for period of interest\n");
