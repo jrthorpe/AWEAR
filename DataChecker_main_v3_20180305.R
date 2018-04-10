@@ -58,8 +58,8 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 userid <- users$julia
 
 # set the period of interest
-d.start <- as.POSIXct("2018-02-01") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-03-16")
+d.start <- as.POSIXct("2018-02-10") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-02-1")
 
 # IMPORT AND RESTRUCTURE DATA -------------------------------------------------------------------------------------------
 
@@ -87,6 +87,7 @@ datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any nul
 # QUALITY CHECK -------------------------------------------------------------------------------------------
 
 # Is data coming from watch, phone or both?
+#TODO: move into separate function
 for (i in 1:length(datasets.all)){
   #browser()
   j <- datasets.all[[i]]
@@ -96,6 +97,8 @@ for (i in 1:length(datasets.all)){
     cat("Last reading in",names(datasets.all)[i],"is on",capture.output(max(j$timestamp)),"\n");
   }
 }
+
+#lapply(restructure, userid, d.start, d.stop)
 
 # VISUALISE DATA-------------------------------------------------------------------------------------------
 
@@ -113,28 +116,54 @@ show_plots(datasets.all, to_plot)
 location<-datasets.all$location
 location.projected <- mapproject(location$lon, location$lat,
                                  projection = "orthographic")
-# -- Life Space --
+
+
+# Detect trajectories
+# Detect stay points / hotspots
+# Detect home
+
+# TRAJECTORIES ----
+
+# Version T1: Based on time and distance threshold
+gps.log <- select(location, lat, lon, timestamp, intervals) %>% 
+  arrange(timestamp)
+
+# split into trajectories
+threshold.t <- 10/60 # 10 minutes in hours
+gps.traj <- mutate(gps.log,breakpoints=intervals>threshold.t) %>%
+  mutate(traj_id=c(1,cumsum(gps.traj$breakpoints[-1])+1))
+
+plot_ly(gps.traj,
+        x=~lon,
+        y=~lat,
+        type = "scatter",
+        mode = "lines+markers",
+        color = ~as.factor(traj_id))
+
+
+# Calculated directly on location data: 
+# -> minimum convex polygon (area)
+# -> ...
+
+
+# -> Action range
+# -> Standard deviation elipse 
+# -> Distance covered (including for trips only - later)
+# -> ...
+
 
 # Minimum convex polygon
 # Reference: http://mgritts.github.io/2016/04/02/homerange-mcp/
+source("metrics/mcp.R") #TODO: move to top
 
-# calculate distances from all points to centroid of the location data
 xy <- select(location, lat, lon)
-centroid <- apply(xy,2,mean)
-distances <- sqrt(((xy[, 1] - centroid[1])^2) + ((xy[, 2] - centroid[2])^2))
+mcp.results <- get_mcp(xy, quantile=.99)
 
-# get subset of points within specified quantile of distances
-indx <- 1:length(distances)
-percentages <- indx[distances <= quantile(distances, .999)]
-xy.subset <- xy[percentages, ]
+mcp <- mcp.results$mcp
+mcp.poly <- mcp.results$mcp.poly
+centroid <- mcp.results$centroid
 
-# get minimum convex polygon
-mcp.points <- chull(xy.subset[, 1], xy.subset[, 2]) # index of points that lie on mcp
-mcp <- xy.subset[mcp.points,] # coords of mcp
-mcp <- rbind(mcp[nrow(mcp), ], mcp) # repeat last point to close shape
-
-mcp.poly<-Polygon(mcp) # creates a polygon object with area attribute (access uing @area)
-
+# Plot results
 plot_ly(xy, 
         x=~lon, 
         y=~lat, 
@@ -142,25 +171,29 @@ plot_ly(xy,
         mode = "markers",
         name = "location data",
         marker = list(size = 2)
-        #color = ~dsource
         )%>%
-  #add_trace(x=~centroid[1], y=~centroid[2], mode = "markers", marker = list(size = 10), name = 'centroid') %>%
-  add_trace(x=~mcp$lon, y=~mcp$lat, mode = "lines", name = 'mcp') %>%
-  add_trace(x=~rxy$lon, y=~rxy$lat, mode = "markers", marker = list(size = 2))
-
-rxy<-xy[sample(nrow(xy), 1000), ]
-
-
+  add_trace(x=~centroid[2], y=~centroid[1], mode = "markers", marker = list(size = 10), name = 'centroid') %>%
+  add_trace(x=~mcp$lon, y=~mcp$lat, mode = "markers+lines", name = 'mcp')
+  
 #testing plot_geo
 # (deleted, need to start over)
 
 # Standard Deviation Elipse
+# A function exists in python, need to find or write for R, eg using this explanation:
+# http://desktop.arcgis.com/en/arcmap/10.3/tools/spatial-statistics-toolbox/h-how-directional-distribution-standard-deviationa.htm
 
-# Action Range
 
-# Distance covered (including for trips only)
 
-# -- Other --
+
+#- Calculating points of interest (or stops or stays) in the data: -#
+
+# References: see files downloaded from GitHub. These use time and distance
+# between points against thresholds to assign points to "stay events", based on
+# work in an article by Zheng.
+
+
+
+
 # Number of trips
 # Number of hotspots
 # Time spent out of / at home:
@@ -202,4 +235,23 @@ plot_ly(loc.counts,
 # for looking at drifting timestamp and watch data
 plot_ly(datasets.all$step_count, x=~index, y = ~timestamp, type="scatter", mode="markers", color=~funf_version)
 
+
+# trying out code found on Github:
+source("git_mobility.R")
+library("DataCombine")
+library("zoo")
+library("plyr")
+mobility_stay<- stayevent(mobility, coor = c("lon","lat"), time = "datetime", dist.threshold = 100,
+                 time.threshold = 30, time.units = "mins", groupvar = "id")
+
+mobility_stay_test<- stayevent(gps.log, coor = c("lon","lat"), time = "timestamp", dist.threshold = 100,
+                          time.threshold = 30, time.units = "mins")
+plot_ly(mobility_stay_test,
+        x=~lon,
+        y=~lat,
+        type = "scatter",
+        mode = "markers",
+        color = ~as.factor(stayeventgroup))
+# next task:
+# plot all points in light grey then "add trace" to plot stayevents in colour
 

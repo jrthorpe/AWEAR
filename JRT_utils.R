@@ -44,6 +44,8 @@ restructure <- function(dat, userid, d.start, d.stop) {
   # output:
   # - dat: restructured dataframe
   
+  # TODO: if d.start and d.stop are same date, then there is no data in dat once filtered and the code that follows generates errors
+  
   #browser() # for debugging
   cat("\n *** \n Processing file containing: ",colnames(dat)[-(1:7)], "\n\n");
   
@@ -355,5 +357,52 @@ show_plots <- function(datasets, to_plot) {
 # check if "foot" is always with either walking or running then remove
 # prioritise then remove duplicate timestamps (ie if all have same confidence then don't use "unknown" or "tilting")
 
+grouptime<- function(df, time = NULL, units = c("auto", "secs", "mins", "hours", "days", "weeks"),
+                     threshold = NULL, groupvar = NULL) {
+  if (is.atomic(df)) {
+    df <- data.frame(x = df)
+  }
+  
+  if (!is.POSIXct(df[time][[1]])){
+    stop("Time variable must be POSIXct format.")
+  }
+  
+  if (is.null(threshold)){
+    stop("A threshold must be supplied to generate time groups.")
+  }
+  
+  if (is.null(groupvar)){
+    timediff<- as.numeric(difftime(df[nrow(df),time], df[1,time], units = units))
+    df$timegroup<- ifelse(timediff>=threshold, 1, 0)
+    return(df$timediff)
+  }
+  
+  if (!is.null(groupvar)){
+    df3<- ddply(df, .(get(groupvar)), function(z){
+      data.frame(timediff = as.numeric(difftime(z[nrow(z),time], z[1,time]), units = units))
+    })
+    df3$timegroup<- ifelse(df3$timediff>=threshold, 1, 0)
+    names(df3)<- c(groupvar, "timediff","timegroup")
+    df3<- subset(df3, !is.na(get(groupvar)))
+    df<- mergewithorder(df, df3, by=groupvar)
+    
+    return(df$timegroup)
+  }
+}
 
 
+qualitychecks<- function(df){
+  # df containing dsource column indicating device from which data was recorded, and timestamps
+  #
+  
+  # check that the required columns exist:
+  
+  
+  # device source:
+  cat("Data in ", deparse(substitute(df)), "comes from ", levels(distinct(df,dsource)[,1]),"\n");
+  
+  # last reading:
+  cat("Last reading in", deparse(substitute(df)), "is on", capture.output(max(j$timestamp)), "\n");
+  
+  
+}
