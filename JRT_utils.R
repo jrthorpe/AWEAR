@@ -83,6 +83,7 @@ restructure <- function(dat, userid, d.start, d.stop) {
   # to do: include inputs to the function to indicate which new columns are desired
   dat %<>% 
     mutate(intervals = c(NA,(diff(timestamp)/(60*60)))) %>% # intervals between readings in hours
+    mutate(intervals.alt = c(NA,(diff(timestamp)/(60*60)))) %>% # intervals between readings in hours
     mutate(dates = as.character.Date(as.Date(dat$timestamp))) %>%  # dates
     mutate(times = as.POSIXct(strftime(dat$timestamp, format="%H:%M:%S"), format="%H:%M:%S")) %>%  # add times for plotting time on y axis (note: to get the times in the right format, they are all just assigned the same date)
     mutate(index = c(1:nrow(dat))) # index for testing purposes
@@ -148,6 +149,15 @@ show_plots <- function(datasets, to_plot) {
   # datasets is a list of dataframes; to_plot is a vector of the dataframes to be plotted
   custom.colors <- c("red","orange","gold","green","dodgerblue","purple","pink") #https://www.w3.org/TR/css-color-3/#svg-color
   
+  m <- list(
+    l = 50,
+    r = 50,
+    b = 100,
+    t = 100,
+    pad = 4
+  )
+ #layout(autosize = F, width = 500, height = 500, margin = m)
+  
    # Activity:
   if("activity" %in% to_plot & "activity" %in% names(datasets)){
     activity <- (datasets.all$activity)
@@ -159,7 +169,8 @@ show_plots <- function(datasets, to_plot) {
             type = 'bar', color = ~label) %>%
       layout(yaxis = list(title = 'Count'),
              xaxis = list(title = 'Date'),
-             margin = list(b = 100, t=100),
+             margin = m,
+             #autosize = F, width = 1500, height = 1500,
              barmode = 'stack',
              title = "Total activity readings per day by type")
     
@@ -169,10 +180,11 @@ show_plots <- function(datasets, to_plot) {
             y=~times %>% format.Date(format="%H:%M"),
             type="scatter",
             mode="markers",
-            color=~label) %>%
+            color=~label,
+            colors="Set1") %>%
       layout(yaxis = list(title = 'Time of day'),
              xaxis = list(title = 'Date'),
-             margin = list(b = 100, t=100),
+             margin = m,
              title = "Activities over time for each day")
   }
   else{
@@ -189,7 +201,7 @@ show_plots <- function(datasets, to_plot) {
             type="scatter", 
             mode="markers", 
             color=~mode) %>%
-      layout(margin = list(b = 100, t=100),
+      layout(margin = m,
              xaxis = list(title = 'Time'),
              title = "Battery level and charging patterns")
   }
@@ -211,7 +223,7 @@ show_plots <- function(datasets, to_plot) {
              marker = list(size = 10)) %>%
       layout(yaxis = list(title = 'Time of day'),
              xaxis = list(title = 'Date'),
-             margin = list(b = 100, t=100),
+             margin = m,
              title = "Experience sampling: logged responses")
     
     # Currently unused (need a better way of visualising the answers)
@@ -268,25 +280,26 @@ show_plots <- function(datasets, to_plot) {
     # plotly example: https://plot.ly/~ben_derv/0/gps/#code
     location.plot1 <- plot_ly(location,x=~lon,y=~lat,
             type = "scatter", mode = 'lines+markers',
-            symbol = ~dates,
-            symbols = shapes,
-            color = ~weekdays(as.Date(dates))
+            # symbol = ~dates,
+            # symbols = shapes,
+            # color = ~weekdays(as.Date(dates))
+            color =  ~dates
             #colors = custom.colors
             ) %>%
-      layout(margin = list(b = 100, t=100),
+      layout(margin = m,
              title = "Location traces by day from watch and phone combined")
     location.plot2 <-  plot_ly(location.watch,x=~lon,y=~lat,
             type = "scatter", mode = 'lines+markers',
             color = ~dates,
             colors = ~custom.colors[1:length(unique(dates))])  %>%
-      layout(margin = list(b = 100, t=100),
+      layout(margin = m,
              title = "Location traces by day from watch only")
     # Look at watch vs phone data:
     location.plot3 <- plot_ly(location,x=~lon,y=~lat,
                               type = "scatter", mode = 'lines+markers',
                               color = ~dsource,
                               colors = c("cadetblue","purple")) %>%
-      layout(margin = list(b = 100, t=100),
+      layout(margin = m,
              title = "Location data from watch and phone")
   }
   else{
@@ -307,7 +320,7 @@ show_plots <- function(datasets, to_plot) {
             symbols= c(1,4)) %>%
     layout(yaxis = list(title = 'Time of day'),
            xaxis = list(title = 'Date'),
-           margin = list(b = 100, t=100),
+           margin = m,
            title = "Phone screen on/off transitions")
   }
   else{
@@ -331,7 +344,7 @@ show_plots <- function(datasets, to_plot) {
             colors = c("cadetblue","purple")) %>%
       layout(yaxis = list(title = 'Step count'),
             xaxis = list(title = 'Date'),
-            margin = list(b = 100, t=100),
+            margin = m,
             title = "Recorded stepcount for watch and phone")
   }
   else{
@@ -405,4 +418,16 @@ qualitychecks<- function(df){
   cat("Last reading in", deparse(substitute(df)), "is on", capture.output(max(j$timestamp)), "\n");
   
   
+}
+
+findhome <- function(df,lat,lon){
+  # df containing latitude and longitude with more than 4 decimal places
+  # lat: name of latitude column
+  # lon: name of longitude column
+
+  locations4 <- data.frame(lat4=round(df[,lat],4),lon4=round(df[,lon],4))
+  loc.counts <- count(locations4,lat4,lon4) %>% arrange(desc(n))
+  home <- data.frame(select(loc.counts[1,],c(lat4,lon4)))
+
+  return(home)
 }

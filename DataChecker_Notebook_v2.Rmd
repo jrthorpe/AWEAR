@@ -54,7 +54,8 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
               P06SS = "f9f24838-c844-42d4-8343-b20ebdd220f3",
               P07MG = "4fbfddd0-a346-41c8-be8d-f8804b5068d3",
               P08UH = "a85f299e-7a09-4ba7-bc19-8a200c2686c2",
-              P10JL = "d05fa984-8d3b-4405-b417-211d1a3f50d6")
+              P10JL = "d05fa984-8d3b-4405-b417-211d1a3f50d6",
+              P13NB = "75cc5240-7805-4550-aeae-873df9984710")
 
 ```
 
@@ -62,11 +63,11 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 ```{r Settings, echo=FALSE}
 
 # Select user
-userid <- users$P10JL
+userid <- users$P13NB
 
 # Set period of interest
-d.start <- as.POSIXct("2018-03-19") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-03-30")
+d.start <- as.POSIXct("2018-04-25") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-05-09")
 
 cat("This report is for user ", names(users[users==userid]), "for the time period from ", as.character(d.start), " to ", as.character(d.stop)) 
 
@@ -81,12 +82,12 @@ File | Description | Status
 "activity.csv" | coded activity types | in use
 "battery.csv" | charging log | in use
 "bluetooth.csv" | - | not in use
-"calllog.csv" | log of phonecalls | to be added
+"calllog.csv" | log of phonecalls | not in use
 "experience_sampling.csv" | answers to daily self-reports | in use
 "hardware_info.csv" | - | not in use
 "location.csv" | GPS data from watch and phone | in use
 "screen.csv" | screen on/off transitions (phone) | in use
-"sms.csv" | sms log | to be added
+"sms.csv" | sms log | not in use
 "step_count.csv" | step counts from watch and phone | in use
 "wearable.csv" | - | no longer in use
 "wifi.csv"  | - | not in use
@@ -119,13 +120,13 @@ for (i in 1:length(datasets.all)){
 
 ## Visualise data:
 
-to do
+<!-- to do -->
 
-* resolve warnings
-* customise colours
-* axes with dates: orders not in time, january after feb (ordered by day not taking month into account)
+<!-- * resolve warnings -->
+<!-- * customise colours -->
+<!-- * axes with dates: orders not in time, january after feb (ordered by day not taking month into account) -->
 
-```{r Plots, echo=FALSE}
+```{r Plots, echo=FALSE, warning=FALSE}
 results<-show_plots(datasets.all, to_plot)
 for(i in 1:length(results)){
   print(results[[i]])

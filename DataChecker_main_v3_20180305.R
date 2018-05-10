@@ -38,7 +38,6 @@ source("JRT_utils.R")
 # Define constants:
 folder <- "../../Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
 not.in.use <- c("bluetooth","hardware_info","wearable","wifi")
-activity.selection <- c("Still", "Foot", "Vehicle", "Tilting", "Bicycle") # main activity types
 to_plot <- c("activity", 
              "battery", 
              "exps", 
@@ -58,8 +57,8 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 userid <- users$julia
 
 # set the period of interest
-d.start <- as.POSIXct("2018-02-10") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-02-1")
+d.start <- as.POSIXct("2018-02-11") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-02-18")
 
 # IMPORT AND RESTRUCTURE DATA -------------------------------------------------------------------------------------------
 
@@ -84,6 +83,8 @@ datasets.all <- get.data(folder, not.in.use) %>%
   lapply(restructure, userid, d.start, d.stop)
 datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any null dataframes
 
+remove(d.start, d.stop, folder, not.in.use, userid, users)
+
 # QUALITY CHECK -------------------------------------------------------------------------------------------
 
 # Is data coming from watch, phone or both?
@@ -104,7 +105,7 @@ for (i in 1:length(datasets.all)){
 
 show_plots(datasets.all, to_plot)
 
-# BEHAVIOURAL METRICS -------------------------------------------------------------------------------------------
+# BEHAVIOURAL METRICS -------------------------------------------------------------------------------------
 
 # (THIS WILL MOVE INTO SEPARATE SCRIPT)
 
@@ -113,44 +114,171 @@ show_plots(datasets.all, to_plot)
 # - 
 
 # I: Mobility 
-location<-datasets.all$location
-location.projected <- mapproject(location$lon, location$lat,
-                                 projection = "orthographic")
 
-
+# Tasks:
 # Detect trajectories
 # Detect stay points / hotspots
 # Detect home
 
+location<-datasets.all$location # Get location dataset
+# location.projected <- mapproject(location$lon, location$lat,projection = "orthographic") # project GPS data onto 2D plane (currently not in use, need to look into it)
+gps.log <- select(location, lat, lon, timestamp, intervals) # Get GPS log file
+
 # TRAJECTORIES ----
 
-# Version T1: Based on time and distance threshold
-gps.log <- select(location, lat, lon, timestamp, intervals) %>% 
-  arrange(timestamp)
+# # Split into trajectories based on time (JRT) 
+# threshold.t <- 10/60 # 10 minutes in hours
+# gps.traj <- mutate(gps.log,breakpoints=intervals>threshold.t) %>% # indicate breaks in the data longer than time threshold
+#   mutate(traj_id=c(1,cumsum(breakpoints[-1])+1)) # allocate all points from one break up to next to a trajectory ID
+# 
+# # get a sample day to plot:
+# test <- filter(gps.traj, timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12"))
+# plot_ly(test, #gps.traj
+#         x=~lon,
+#         y=~lat,
+#         type = "scatter",
+#         mode = "lines+markers",
+#         color = ~as.factor(traj_id))
 
-# split into trajectories
-threshold.t <- 10/60 # 10 minutes in hours
-gps.traj <- mutate(gps.log,breakpoints=intervals>threshold.t) %>%
-  mutate(traj_id=c(1,cumsum(gps.traj$breakpoints[-1])+1))
 
-plot_ly(gps.traj,
+# STAY POINTS (POINTS OF INTEREST / HOTSPOTS) ---- 
+
+# References: see files downloaded from GitHub. These use time and distance
+# between points against thresholds to assign points to "stay events", based on
+# work in an article by Zheng.
+
+
+
+
+# PUWYLO -- Next steps:
+# - create "find home" function
+# - clean up whole stay event section and put into utils where it makes sense
+
+# -Read through code for detecting stay events and write up logic
+# -Create my own based on above with improvements (eg in numbering of stays and trajectories)
+# -Detect home based on the centres of hotspots in the dataset?
+# -For each day: 
+#  .. Number of trips/stays
+#  .. Time spent out of / at home
+#  .. Distance covered in trajectories
+#  .. Plot the day: over time, plot a bar with "home", "transit", "location A", "location B" etc
+#  .. Work out how to annotate with the logbooks
+
+# Editing and organising code: detecting stays using my own, github reference, or signal processing methods...
+
+# trying out code found on Github:
+source("git_mobility.R")
+library("DataCombine")
+library("zoo")
+library("plyr")
+
+
+gps.log %<>% filter(timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
+
+# to do: create own code for this based on paper
+mobility_stay_test<- stayevent(gps.log, coor = c("lon","lat"), time = "timestamp", dist.threshold = 60,
+                               time.threshold = 10, time.units = "mins")
+
+gps.log %<>% cbind(stayeventgroup=mobility_stay_test$stayeventgroup)
+#gps.log$event_group <- is.na(gps.log$stayeventgroup)*1
+
+
+gps.log %<>% mutate(stayeventgroup=mobility_stay_test$stayeventgroup)  %<>% 
+  mutate(stay=(!is.na(gps.log$stayeventgroup))*1)  %<>% 
+  mutate(staygo_group=cumsum(c(0,abs(diff(stay)))))
+  
+
+# Stay events: get centroids and times
+
+# to try: get "mode" of all points after dropping one decimal place (4 places)
+# https://en.wikipedia.org/wiki/Decimal_degrees
+location.alt <- data.frame(lat4=round(location$lat,4),lon4=round(location$lon,4))
+loc.counts <- count(location.alt,lat4,lon4) %>% arrange(desc(n))
+home <- select(loc.counts[1,],c(lat,lon))
+
+# # Test: max distance from rounding off coordinates:
+# # Result: ~15m
+# # home to 4 decimals: 55.6854 12.5536
+# p1 <- c(55.68545, 12.55355)
+# p2 <- c(55.68535, 12.55365) 
+# distGeo(p1,p2,a=6378137, f=1/298.257223563)
+
+detach(package:plyr) #need to find out whether I need plyr at all
+test<-gps.log %>%
+  filter(stay==1) %>%
+  group_by(staygo_group) %>%
+  summarize(c.lat = mean(lat),c.lon = mean(lon),arrive = min(timestamp),depart=max(timestamp))
+
+# Plot stay centroids:
+plot_ly(test,
+        x=~c.lon,
+        y=~c.lat,
+        type = "scatter",
+        mode = "markers")
+
+
+
+# Plot results overlaid over GPS trace for all datapoints:
+plot_ly(gps.log,
         x=~lon,
         y=~lat,
         type = "scatter",
         mode = "lines+markers",
-        color = ~as.factor(traj_id))
+        marker = list(size = 5),
+        line = list(width = 1),
+        color = I('grey40')) %>%
+  add_trace(x=~lon,
+            y=~lat,
+            type = "scatter",
+            mode = "markers",
+            marker = list(size = 10),
+            color = ~as.factor(stayeventgroup),
+            colors = "Set1")
+
+# my attempt at the signal processing method
+dist <- c(0, distGeo(gps.log[c("lon","lat")],a=6378137, f=1/298.257223563)) #append 0 to keep same length (at the first point, no distance is covered)
+cum_dist<-cumsum(dist)
 
 
-# Calculated directly on location data: 
-# -> minimum convex polygon (area)
-# -> ...
+#...need to implement rest of method, so far just the distance signals...
+
+gps.log %<>% cbind(dist,cum_dist)
 
 
-# -> Action range
-# -> Standard deviation elipse 
-# -> Distance covered (including for trips only - later)
-# -> ...
+# Plot the stay events on the cumulative distanc plot for a visual comparison
+plot_ly(gps.log,
+        x=~timestamp,
+        y=~cum_dist,
+        #name="cumulative distance (m)",
+        type = "scatter",
+        mode = "lines",
+        color = I('black')
+) %>%
+  add_trace(x=~timestamp,
+            y=~cum_dist,
+            type = "scatter",
+            mode = "markers",
+            marker = list(size = 10),
+            color = ~as.factor(stayeventgroup),
+            colors = "Set3" 
+  )
 
+  
+
+# GET HOME LOCATION (FROM STAY POINTS) ----
+
+# Get home location as statistical mode of all lat lon data for a user
+loc.counts <- count(location,lat,lon) %>% arrange(desc(n))
+home <- select(loc.counts[1,],c(lat,lon))
+#NOTE: the above method does absolutely not work to detect home! (See Julia's
+#data, where Glostrup was detected as home). This could be because as long as
+#google maps is on, the system gets lots of data, whereas at home there won't be
+#many recordings. Need to detect clusters and select most dense or something
+#like that.
+
+
+
+# LIFESPACE (DIST/AREA METRICS) ----
 
 # Minimum convex polygon
 # Reference: http://mgritts.github.io/2016/04/02/homerange-mcp/
@@ -171,10 +299,10 @@ plot_ly(xy,
         mode = "markers",
         name = "location data",
         marker = list(size = 2)
-        )%>%
+)%>%
   add_trace(x=~centroid[2], y=~centroid[1], mode = "markers", marker = list(size = 10), name = 'centroid') %>%
   add_trace(x=~mcp$lon, y=~mcp$lat, mode = "markers+lines", name = 'mcp')
-  
+
 #testing plot_geo
 # (deleted, need to start over)
 
@@ -185,44 +313,24 @@ plot_ly(xy,
 
 
 
-#- Calculating points of interest (or stops or stays) in the data: -#
-
-# References: see files downloaded from GitHub. These use time and distance
-# between points against thresholds to assign points to "stay events", based on
-# work in an article by Zheng.
 
 
 
 
-# Number of trips
-# Number of hotspots
-# Time spent out of / at home:
-  
-  # Get home location as statistical mode of all lat lon data for a user
 
-loc.counts <- count(location,lat,lon) %>% arrange(desc(n))
-home <- select(loc.counts[1,],c(lat,lon))
-#NOTE: the above method does absolutely not work to detect home! (See Julia's
-#data, where Glostrup was detected as home). This could be because as long as
-#google maps is on, the system gets lots of data, whereas at home there won't be
-#many recordings. Need to detect clusters and select most dense or something
-#like that.
 
-# plot of unique locations in dataset with marker size based on number of occurences
-plot_ly(loc.counts, 
-        x = ~lon, 
-        y = ~lat, 
-        type = "scatter", mode = 'markers',
-        marker = list(size = ~n))
 
-plot_ly(loc.counts, 
-        x = ~lon, 
-        y = ~lat, 
-        type = "scatter", mode = 'markers',
-        marker = list(size = ~n))
 
-  # Classify all points as "at home" if within 100m of home location, "out of home" if not
-  # Separate into bouts with periods etc...
+
+
+
+
+
+
+
+
+
+
 
 # II: Activity:
 
@@ -235,23 +343,33 @@ plot_ly(loc.counts,
 # for looking at drifting timestamp and watch data
 plot_ly(datasets.all$step_count, x=~index, y = ~timestamp, type="scatter", mode="markers", color=~funf_version)
 
+# TEST CANVAS--------------------
 
-# trying out code found on Github:
-source("git_mobility.R")
-library("DataCombine")
-library("zoo")
-library("plyr")
-mobility_stay<- stayevent(mobility, coor = c("lon","lat"), time = "datetime", dist.threshold = 100,
-                 time.threshold = 30, time.units = "mins", groupvar = "id")
+# -------------#
+# From looking into detecting home as most common location point (did not work!):
+# plot of unique locations in dataset with marker size based on number of occurences
+plot_ly(loc.counts, 
+        x = ~lon, 
+        y = ~lat, 
+        type = "scatter", mode = 'markers',
+        marker = list(size = ~n))
 
-mobility_stay_test<- stayevent(gps.log, coor = c("lon","lat"), time = "timestamp", dist.threshold = 100,
-                          time.threshold = 30, time.units = "mins")
-plot_ly(mobility_stay_test,
-        x=~lon,
-        y=~lat,
-        type = "scatter",
-        mode = "markers",
-        color = ~as.factor(stayeventgroup))
-# next task:
-# plot all points in light grey then "add trace" to plot stayevents in colour
+plot_ly(loc.counts, 
+        x = ~lon, 
+        y = ~lat, 
+        type = "scatter", mode = 'markers',
+        marker = list(size = ~n))
+# Ideas:
+# Classify all points as "at home" if within 100m of home location, "out of home" if not
+# Separate into bouts with periods etc...
+# -------------#
 
+# -------------#
+# NO idea what this was:
+
+#for updating:
+gps.log$flag <- replace(mobility_stay_test$stayeventgroup,
+                        !is.na(mobility_stay_test$stayeventgroup), 0)
+gps.log$flag <- replace(gps.log$flag,
+                        is.na(gps.log$flag), 1)
+# -------------#  

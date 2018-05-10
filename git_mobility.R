@@ -79,7 +79,7 @@ groupdist<- function(df, coor = NULL, threshold = NULL, groupvar = NULL) {
   if (is.null(threshold)) {
     stop("A threshold must be specified.")
   }
-  
+  #browser()
   if (is.null(groupvar)) {
     group<- rep(1, nrow(df))
     df2<- cbind(df[,coor], group)
@@ -109,6 +109,7 @@ groupdist<- function(df, coor = NULL, threshold = NULL, groupvar = NULL) {
     )
   }
   
+  #browser()
   coor2<- paste0(coor, "1")
   latlon<- df2[,coor]
   latlonlag2<- df2[,coor2]
@@ -147,7 +148,7 @@ grouptime<- function(df, time = NULL, units = c("auto", "secs", "mins", "hours",
     df$timegroup<- ifelse(timediff>=threshold, 1, 0)
     return(df$timediff)
   }
-  
+  #browser()
   if (!is.null(groupvar)){
     df3<- ddply(df, .(get(groupvar)), function(z){
       data.frame(timediff = as.numeric(difftime(z[nrow(z),time], z[1,time]), units = units))
@@ -250,7 +251,7 @@ seqgroup<- function(df, var = NULL) {
   if (is.atomic(df)) {
     df <- data.frame(x = df)
   }
-  
+  #browser()
   if (is.null(var)) {
     group<- seq(1:nrow(df))
   } else {
@@ -279,7 +280,7 @@ stayevent<- function (df, coor = NULL, time = NULL, dist.threshold = NULL, time.
   df$distgroup<- groupdist(df, coor = coor, threshold = dist.threshold, groupvar = groupvar)
   df$timegroup<- grouptime(df, time = time, units = time.units, threshold = time.threshold, groupvar = "distgroup")
   df$stayeventgroup<- ifelse(!is.na(df$distgroup) & df$timegroup == 1, df$distgroup, NA)
-  
+  #browser()
   stayevents<- aggregate(cbind(get(coor[1]), get(coor[2]))~stayeventgroup, df, mean)
   names(stayevents)<- c("stayeventgroup", "stayeventlon", "stayeventlat")
   
