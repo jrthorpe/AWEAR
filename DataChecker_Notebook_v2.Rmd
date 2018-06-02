@@ -45,6 +45,7 @@ to_plot <- c("activity",
              "steps")
 users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
               dean = "b1316280-38a6-45e1-9bb9-7afb2a1a2a96",
+              luna = "4afe61c5-c5cc-4de4-8f50-9499057668ad",
               per = "7bf5fec3-f46f-419e-9573-001fe9b47d81",
               verena = "a0c74a88-b293-4b31-92c0-967502b28132",
               agzam = "52152dda-0f54-46d1-affa-6dea85f840dc",
@@ -66,8 +67,8 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 userid <- users$P13NB
 
 # Set period of interest
-d.start <- as.POSIXct("2018-04-25") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-05-09")
+d.start <- as.POSIXct("2018-05-05") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-06-02")
 
 cat("This report is for user ", names(users[users==userid]), "for the time period from ", as.character(d.start), " to ", as.character(d.stop)) 
 

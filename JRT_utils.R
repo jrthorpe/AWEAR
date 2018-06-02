@@ -421,6 +421,9 @@ qualitychecks<- function(df){
 }
 
 findhome <- function(df,lat,lon){
+  # Get "mode" of all points after dropping one decimal place (4 places)
+  # https://en.wikipedia.org/wiki/Decimal_degrees
+  
   # df containing latitude and longitude with more than 4 decimal places
   # lat: name of latitude column
   # lon: name of longitude column

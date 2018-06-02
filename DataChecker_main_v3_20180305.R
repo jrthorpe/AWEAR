@@ -2,7 +2,7 @@
 #
 #********************************************************************************************
 # Author: Julia Thorpe
-# Written for AWEAR Case Studies, January-May 2018, as part of an ongoing PhD
+# Written for AWEAR Case Studies, January-June 2018, as part of an ongoing PhD
 # project on Engineering Systems Design in Healthcare at DTU in collaboration
 # with Rigshospitalet-Glostrup
 
@@ -17,6 +17,12 @@ setwd("M:/PhD_Folder/CaseStudies/Data_analysis/source")
 
 # Load required packages:
 # (Note: had trouble installing packages which I resolved by using .libpaths() to find where packages are installed and manually moving the packages from wherever R temporarily installed them to there)
+
+# For mobility pack (downloaded from Git)
+library(DataCombine)
+library(zoo)
+library(plyr)
+
 library(data.table)
 library(dtplyr)
 library(dplyr)
@@ -34,6 +40,7 @@ library(geosphere) # added in v3
 
 # Load custom functions:
 source("JRT_utils.R")
+source("git_mobility.R")
 
 # Define constants:
 folder <- "../../Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
@@ -115,48 +122,16 @@ show_plots(datasets.all, to_plot)
 
 # I: Mobility 
 
-# Tasks:
-# Detect trajectories
-# Detect stay points / hotspots
-# Detect home
-
-location<-datasets.all$location # Get location dataset
-# location.projected <- mapproject(location$lon, location$lat,projection = "orthographic") # project GPS data onto 2D plane (currently not in use, need to look into it)
-gps.log <- select(location, lat, lon, timestamp, intervals) # Get GPS log file
-
 # TRAJECTORIES ----
-
-# # Split into trajectories based on time (JRT) 
-# threshold.t <- 10/60 # 10 minutes in hours
-# gps.traj <- mutate(gps.log,breakpoints=intervals>threshold.t) %>% # indicate breaks in the data longer than time threshold
-#   mutate(traj_id=c(1,cumsum(breakpoints[-1])+1)) # allocate all points from one break up to next to a trajectory ID
-# 
-# # get a sample day to plot:
-# test <- filter(gps.traj, timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12"))
-# plot_ly(test, #gps.traj
-#         x=~lon,
-#         y=~lat,
-#         type = "scatter",
-#         mode = "lines+markers",
-#         color = ~as.factor(traj_id))
-
-
-# STAY POINTS (POINTS OF INTEREST / HOTSPOTS) ---- 
 
 # References: see files downloaded from GitHub. These use time and distance
 # between points against thresholds to assign points to "stay events", based on
 # work in an article by Zheng.
 
-
-
-
-# PUWYLO -- Next steps:
-# - create "find home" function
-# - clean up whole stay event section and put into utils where it makes sense
-
+# -Clean up whole stay event section and put into utils where it makes sense
 # -Read through code for detecting stay events and write up logic
 # -Create my own based on above with improvements (eg in numbering of stays and trajectories)
-# -Detect home based on the centres of hotspots in the dataset?
+
 # -For each day: 
 #  .. Number of trips/stays
 #  .. Time spent out of / at home
@@ -164,59 +139,47 @@ gps.log <- select(location, lat, lon, timestamp, intervals) # Get GPS log file
 #  .. Plot the day: over time, plot a bar with "home", "transit", "location A", "location B" etc
 #  .. Work out how to annotate with the logbooks
 
-# Editing and organising code: detecting stays using my own, github reference, or signal processing methods...
-
-# trying out code found on Github:
-source("git_mobility.R")
-library("DataCombine")
-library("zoo")
-library("plyr")
-
-
-gps.log %<>% filter(timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
+location<-datasets.all$location # Get location dataset
+home <- findhome(location,"lat","lon")
+# location.projected <- mapproject(location$lon, location$lat,projection = "orthographic") # project GPS data onto 2D plane (currently not in use, need to look into it)
+gps.log <- select(location, lat, lon, timestamp, intervals) # Get GPS log file
+gps.traj <- filter(gps.log,timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
 
 # to do: create own code for this based on paper
-mobility_stay_test<- stayevent(gps.log, coor = c("lon","lat"), time = "timestamp", dist.threshold = 60,
+mobility_stay_test<- stayevent(gps.traj, coor = c("lon","lat"), time = "timestamp", dist.threshold = 60,
                                time.threshold = 10, time.units = "mins")
 
-gps.log %<>% cbind(stayeventgroup=mobility_stay_test$stayeventgroup)
-#gps.log$event_group <- is.na(gps.log$stayeventgroup)*1
-
-
-gps.log %<>% mutate(stayeventgroup=mobility_stay_test$stayeventgroup)  %<>% 
-  mutate(stay=(!is.na(gps.log$stayeventgroup))*1)  %<>% 
+gps.traj %<>% mutate(stayeventgroup=mobility_stay_test$stayeventgroup)  %<>% 
+  mutate(stay=(!is.na(stayeventgroup))*1)  %<>% 
   mutate(staygo_group=cumsum(c(0,abs(diff(stay)))))
-  
 
 # Stay events: get centroids and times
-
-# to try: get "mode" of all points after dropping one decimal place (4 places)
-# https://en.wikipedia.org/wiki/Decimal_degrees
-location.alt <- data.frame(lat4=round(location$lat,4),lon4=round(location$lon,4))
-loc.counts <- count(location.alt,lat4,lon4) %>% arrange(desc(n))
-home <- select(loc.counts[1,],c(lat,lon))
-
-# # Test: max distance from rounding off coordinates:
-# # Result: ~15m
-# # home to 4 decimals: 55.6854 12.5536
-# p1 <- c(55.68545, 12.55355)
-# p2 <- c(55.68535, 12.55365) 
-# distGeo(p1,p2,a=6378137, f=1/298.257223563)
-
 detach(package:plyr) #need to find out whether I need plyr at all
-test<-gps.log %>%
+stay.info <- gps.traj %>%
   filter(stay==1) %>%
   group_by(staygo_group) %>%
   summarize(c.lat = mean(lat),c.lon = mean(lon),arrive = min(timestamp),depart=max(timestamp))
 
+# Classify stays as "home" or "other" based on distance
+home_threshold <- 16
+p1<-rev(home)
+p2<-stay.info[,c("c.lon","c.lat")]
+stay.info %<>% mutate(dist2home=distGeo(p1, p2, a=6378137, f=1/298.257223563)) %>%
+  mutate(home=dist2home<home_threshold)
+
+remove(mobility_stay_test,p1,p2)
+
+# PUWYLO:
+# Calculate time spent at home and/or out of home
+
+
+  
 # Plot stay centroids:
 plot_ly(test,
         x=~c.lon,
         y=~c.lat,
         type = "scatter",
         mode = "markers")
-
-
 
 # Plot results overlaid over GPS trace for all datapoints:
 plot_ly(gps.log,
