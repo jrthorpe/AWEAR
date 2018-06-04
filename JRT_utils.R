@@ -415,22 +415,24 @@ qualitychecks<- function(df){
   cat("Data in ", deparse(substitute(df)), "comes from ", levels(distinct(df,dsource)[,1]),"\n");
   
   # last reading:
-  cat("Last reading in", deparse(substitute(df)), "is on", capture.output(max(j$timestamp)), "\n");
+  cat("Last reading in", deparse(substitute(df)), "is on", capture.output(max(df$timestamp)), "\n");
   
   
 }
+# 
+# findhome <- function(df,lat,lon){
+#   # Get "mode" of all points after dropping one decimal place (4 places)
+#   # https://en.wikipedia.org/wiki/Decimal_degrees
+#   
+#   # df containing latitude and longitude with more than 4 decimal places
+#   # lat: name of latitude column
+#   # lon: name of longitude column
+#   browser()
+#   locations4 <- data.frame(lat4=round(df[,lat],4),lon4=round(df[,lon],4))
+#   loc.counts <- count(locations4,lat4,lon4) %>% arrange(desc(n))
+#   home <- data.frame(select(loc.counts[1,],c(lat4,lon4)))
+#   
+#   return(home)
+# }
 
-findhome <- function(df,lat,lon){
-  # Get "mode" of all points after dropping one decimal place (4 places)
-  # https://en.wikipedia.org/wiki/Decimal_degrees
-  
-  # df containing latitude and longitude with more than 4 decimal places
-  # lat: name of latitude column
-  # lon: name of longitude column
 
-  locations4 <- data.frame(lat4=round(df[,lat],4),lon4=round(df[,lon],4))
-  loc.counts <- count(locations4,lat4,lon4) %>% arrange(desc(n))
-  home <- data.frame(select(loc.counts[1,],c(lat4,lon4)))
-
-  return(home)
-}

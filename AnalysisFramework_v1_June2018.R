@@ -93,37 +93,15 @@ datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any nul
 
 remove(d.start, d.stop, folder, not.in.use, userid, users)
 
-# QUALITY CHECK -------------------------------------------------------------------------------------------
-
-# Is data coming from watch, phone or both?
-#TODO: move into separate function
-for (i in 1:length(datasets.all)){
-  #browser()
-  j <- datasets.all[[i]]
-  if(!is.null(j)){
-    #print(distinct(j,funf_version))
-    cat("Data in ",names(datasets.all)[i],"comes from ", distinct(j,dsource)[,1],"\n");
-    cat("Last reading in",names(datasets.all)[i],"is on",capture.output(max(j$timestamp)),"\n");
-  }
-}
-
-#lapply(restructure, userid, d.start, d.stop)
-
 # VISUALISE DATA-------------------------------------------------------------------------------------------
 
-show_plots(datasets.all, to_plot)
+#show_plots(datasets.all, to_plot)
 
-# BEHAVIOURAL METRICS -------------------------------------------------------------------------------------
-
-# (THIS WILL MOVE INTO SEPARATE SCRIPT)
+# MOBILITY -------------------------------------------------------------------------------------
 
 # Notes from reading the thesis:
 # - what is our sampling frequency for GPS data?
 # - 
-
-# I: Mobility 
-
-# TRAJECTORIES ----
 
 # References: see files downloaded from GitHub. These use time and distance
 # between points against thresholds to assign points to "stay events", based on
@@ -142,10 +120,12 @@ show_plots(datasets.all, to_plot)
 
 location<-datasets.all$location # Get location dataset
 home <- findhome(location,"lat","lon")
+
 # location.projected <- mapproject(location$lon, location$lat,projection = "orthographic") # project GPS data onto 2D plane (currently not in use, need to look into it)
-gps.log <- select(location, lat, lon, timestamp, intervals) # Get GPS log file
-gps.traj <- filter(gps.log,timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
-#gps.traj <- gps.log #for entire period in dataset (instead of single day)
+
+gps.log <- select(location, lat, lon, timestamp, intervals, dates, times) # Get GPS log file
+#gps.traj <- filter(gps.log,timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
+gps.traj <- gps.log #for entire period in dataset (instead of single day)
 
 # TODO: create own code for this based on paper
 mobility_stay_test<- stayevent(gps.traj, coor = c("lon","lat"), time = "timestamp", dist.threshold = 60,
@@ -168,16 +148,17 @@ stay.info <- gps.traj %>%
 home_threshold <- 25 # 
 p1<-rev(home) # reverses elements to get lat and lon in correct order
 p2<-stay.info[,c("c.lon","c.lat")]
+
 stay.info %<>% mutate(dist2home=distGeo(p1, p2, a=6378137, f=1/298.257223563)) %>% # create "home" group column (TRUE/FALSE) in stay.info summary
   mutate(home=dist2home<home_threshold)
 
 remove(mobility_stay_test,p1,p2)
 
-# Plot stay centroids and home:
+
 # TODO: get google map in the background using ggmap and ggplotly, see 2.2.4 here: http://plotly-book.cpsievert.me/maps.html
 # TODO: make traces have proper names
 
-
+# Plot stay centroids and home:
 plot_ly(stay.info,
         x=~c.lon,
         y=~c.lat,
@@ -194,19 +175,39 @@ if(stay.info$home[1]) stay.info$arrive[1] <- round(stay.info$arrive[1],"days")
 if(stay.info$home[N]) stay.info$depart[N] <- round(stay.info$depart[N],"days")
 
 # Get all "home" stay event durations
-stay.info %<>% mutate(duration=as.numeric(difftime(depart,arrive,units="hours")))
+stay.info %<>% mutate(durations=as.numeric(difftime(depart,arrive,units="hours")))
 
 # Sum all home durations in hours
-time.home<-sum(stay.info$duration[stay.info$home])
+time.home<-sum(stay.info$durations[stay.info$home])
 
 # PUWYLO:
 #TODO: create function to do this by day so it can be applied to dataset of any period
 # maybe: group_by day, then by event type (home, stay out, journey), then caculate durations
 
-home.groups <- stay.info %>% filter(home) %>% select(staygo_group)
 
-gps.traj %>% mutate(event_type=)
-  
+home.groups <- (stay.info %>% filter(home) %>% select(staygo_group))[[1]]
+out.groups <- (stay.info %>% filter(!home) %>% select(staygo_group))[[1]]
+
+gps.traj %<>% mutate(event_type=NA)
+
+gps.traj$event_type[gps.traj$staygo_group %in% home.groups]="stay_home"
+gps.traj$event_type[gps.traj$staygo_group %in% out.groups]="stay_out"
+gps.traj$event_type[is.na(gps.traj$stayeventgroup)]="go"
+
+# gps.traj %<>% cbind(select(location,dates,times))
+
+plot_ly(gps.traj,
+      x=~dates %>% format.Date(format="%d/%m"),
+      y=~times %>% format.Date(format="%H:%M"),
+      type="scatter",
+      mode="markers",
+      color=~event_type,
+      #colors="Set1"
+      colors=c("orange","grey","black")) %>%
+  layout(yaxis = list(title = 'Time of day'),
+         xaxis = list(title = 'Date'))
+
+
 # todo: look at the "mobility boundaries" from the assessment. Should I be calculating this?
 # todo: create time/day plot with colours showing whether it is "home","out" or "go" events
 
@@ -214,7 +215,7 @@ gps.traj %>% mutate(event_type=)
   
 
 # Plot results overlaid over GPS trace for all datapoints:
-plot_ly(gps.log,
+plot_ly(gps.traj,
         x=~lon,
         y=~lat,
         type = "scatter",
@@ -231,17 +232,17 @@ plot_ly(gps.log,
             colors = "Set1")
 
 # my attempt at the signal processing method
-dist <- c(0, distGeo(gps.log[c("lon","lat")],a=6378137, f=1/298.257223563)) #append 0 to keep same length (at the first point, no distance is covered)
+dist <- c(0, distGeo(gps.traj[c("lon","lat")],a=6378137, f=1/298.257223563)) #append 0 to keep same length (at the first point, no distance is covered)
 cum_dist<-cumsum(dist)
 
 
 #...need to implement rest of method, so far just the distance signals...
 
-gps.log %<>% cbind(dist,cum_dist)
+gps.traj %<>% cbind(dist,cum_dist)
 
 
 # Plot the stay events on the cumulative distanc plot for a visual comparison
-plot_ly(gps.log,
+plot_ly(gps.traj,
         x=~timestamp,
         y=~cum_dist,
         #name="cumulative distance (m)",
@@ -257,20 +258,6 @@ plot_ly(gps.log,
             color = ~as.factor(stayeventgroup),
             colors = "Set3" 
   )
-
-  
-
-# GET HOME LOCATION (FROM STAY POINTS) ----
-
-# Get home location as statistical mode of all lat lon data for a user
-loc.counts <- count(location,lat,lon) %>% arrange(desc(n))
-home <- select(loc.counts[1,],c(lat,lon))
-#NOTE: the above method does absolutely not work to detect home! (See Julia's
-#data, where Glostrup was detected as home). This could be because as long as
-#google maps is on, the system gets lots of data, whereas at home there won't be
-#many recordings. Need to detect clusters and select most dense or something
-#like that.
-
 
 
 # LIFESPACE (DIST/AREA METRICS) ----
@@ -298,73 +285,7 @@ plot_ly(xy,
   add_trace(x=~centroid[2], y=~centroid[1], mode = "markers", marker = list(size = 10), name = 'centroid') %>%
   add_trace(x=~mcp$lon, y=~mcp$lat, mode = "markers+lines", name = 'mcp')
 
-#testing plot_geo
-# (deleted, need to start over)
 
 # Standard Deviation Elipse
 # A function exists in python, need to find or write for R, eg using this explanation:
 # http://desktop.arcgis.com/en/arcmap/10.3/tools/spatial-statistics-toolbox/h-how-directional-distribution-standard-deviationa.htm
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# II: Activity:
-
-# Activity bouts (active and sedentary)
-
-# Stepcounts
-
-## FOR TESTING
-
-# for looking at drifting timestamp and watch data
-plot_ly(datasets.all$step_count, x=~index, y = ~timestamp, type="scatter", mode="markers", color=~funf_version)
-
-# TEST CANVAS--------------------
-
-# -------------#
-# From looking into detecting home as most common location point (did not work!):
-# plot of unique locations in dataset with marker size based on number of occurences
-plot_ly(loc.counts, 
-        x = ~lon, 
-        y = ~lat, 
-        type = "scatter", mode = 'markers',
-        marker = list(size = ~n))
-
-plot_ly(loc.counts, 
-        x = ~lon, 
-        y = ~lat, 
-        type = "scatter", mode = 'markers',
-        marker = list(size = ~n))
-# Ideas:
-# Classify all points as "at home" if within 100m of home location, "out of home" if not
-# Separate into bouts with periods etc...
-# -------------#
-
-# -------------#
-# NO idea what this was:
-
-#for updating:
-gps.log$flag <- replace(mobility_stay_test$stayeventgroup,
-                        !is.na(mobility_stay_test$stayeventgroup), 0)
-gps.log$flag <- replace(gps.log$flag,
-                        is.na(gps.log$flag), 1)
-# -------------#  
