@@ -64,11 +64,11 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 ```{r Settings, echo=FALSE}
 
 # Select user
-userid <- users$P13NB
+userid <- users$P10JL
 
 # Set period of interest
-d.start <- as.POSIXct("2018-05-05") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-06-02")
+d.start <- as.POSIXct("2018-05-28") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-06-06")
 
 cat("This report is for user ", names(users[users==userid]), "for the time period from ", as.character(d.start), " to ", as.character(d.stop)) 
 

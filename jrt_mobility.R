@@ -7,8 +7,8 @@ findhome <- function(df,lat,lon){
   # lon: name of longitude column
   #browser()
   locations4 <- data.frame(lat4=round(df[,lat],4),lon4=round(df[,lon],4))
-  loc.counts <- count(locations4,lat4,lon4) %>% arrange(desc(n))
-  home <- data.frame(select(loc.counts[1,],c(lat4,lon4)))
+  loc.counts <- locations4 %>% count(lat4,lon4, sort=TRUE)
+  home <- as.numeric(select(loc.counts[1,],c(lat4,lon4)))
   
   return(home)
 }

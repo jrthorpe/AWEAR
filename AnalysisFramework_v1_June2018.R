@@ -1,4 +1,4 @@
-# DATA CHECKER
+# AWEAR: BEHAVIOURAL ANALYSIS FRAMEWORK
 #
 #********************************************************************************************
 # Author: Julia Thorpe
@@ -6,9 +6,7 @@
 # project on Engineering Systems Design in Healthcare at DTU in collaboration
 # with Rigshospitalet-Glostrup
 
-# This script imports and plots data from a specified participant and
-# timeframe. This is used to regularly check that the data is being recorded and
-# looks as expected.
+# This script ...
 
 # SETUP -------------------------------------------------------------------------------------------
 # Set the drive, load packages and functions.
@@ -21,7 +19,7 @@ setwd("M:/PhD_Folder/CaseStudies/Data_analysis/source")
 # For mobility pack (downloaded from Git)
 library(DataCombine)
 library(zoo)
-library(plyr)
+#library(plyr)
 
 library(data.table)
 library(dtplyr)
@@ -36,7 +34,9 @@ library(maps)
 library(mapproj)
 library(sp)
 library(caTools)
-library(geosphere) # added in v3
+library(geosphere) # added in v3 of data checker
+
+library(mapview) # added in v1 of analysis framework
 
 # Load custom functions:
 source("JRT_utils.R")
@@ -45,12 +45,12 @@ source("jrt_mobility.R")
 
 # Define constants:
 folder <- "../../Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
-not.in.use <- c("bluetooth","hardware_info","wearable","wifi")
-to_plot <- c("activity", 
-             "battery", 
-             "exps", 
-             "location", 
-             "screen", 
+not.in.use <- c("bluetooth","hardware_info","wearable","wifi","calllog","sms")
+to_plot <- c("activity", # from data checker, for debugging purposes only (visualise all datasets)
+             "battery",
+             "exps",
+             "location",
+             "screen",
              "steps")
 users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
               dean = "b1316280-38a6-45e1-9bb9-7afb2a1a2a96",
@@ -65,8 +65,8 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 userid <- users$julia
 
 # set the period of interest
-d.start <- as.POSIXct("2018-02-11") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-02-18")
+d.start <- as.POSIXct("2018-02-05") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-02-19")
 
 # IMPORT AND RESTRUCTURE DATA -------------------------------------------------------------------------------------------
 
@@ -99,17 +99,9 @@ remove(d.start, d.stop, folder, not.in.use, userid, users)
 
 # MOBILITY -------------------------------------------------------------------------------------
 
-# Notes from reading the thesis:
-# - what is our sampling frequency for GPS data?
-# - 
-
 # References: see files downloaded from GitHub. These use time and distance
 # between points against thresholds to assign points to "stay events", based on
 # work in an article by Zheng.
-
-# -Clean up whole stay event section and put into utils where it makes sense
-# -Read through code for detecting stay events and write up logic
-# -Create my own based on above with improvements (eg in numbering of stays and trajectories)
 
 # -For each day: 
 #  .. Number of trips/stays
@@ -118,26 +110,63 @@ remove(d.start, d.stop, folder, not.in.use, userid, users)
 #  .. Plot the day: over time, plot a bar with "home", "transit", "location A", "location B" etc
 #  .. Work out how to annotate with the logbooks
 
-location<-datasets.all$location # Get location dataset
-home <- findhome(location,"lat","lon")
+# Moblity Setup: create datasets and variables required for mobility calculations -------
 
-# location.projected <- mapproject(location$lon, location$lat,projection = "orthographic") # project GPS data onto 2D plane (currently not in use, need to look into it)
+# Preprocessing steps
+gps.log.pre <- datasets.all$location %>% filter(accuracy<=50)
+keep.ratio <- nrow(gps.log.pre)/nrow(datasets.all$location)
 
-gps.log <- select(location, lat, lon, timestamp, intervals, dates, times) # Get GPS log file
-#gps.traj <- filter(gps.log,timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
-gps.traj <- gps.log #for entire period in dataset (instead of single day)
+# Get GPS log file
+gps.log <- gps.log.pre %>% 
+  select(lat, lon, timestamp, intervals, dates, times) %>% 
+  filter(timestamp>=as.POSIXct("2018-02-11"), timestamp<=as.POSIXct("2018-02-12")) # reduce to single day
+#remove(datasets.all)
 
-# TODO: create own code for this based on paper
-mobility_stay_test<- stayevent(gps.traj, coor = c("lon","lat"), time = "timestamp", dist.threshold = 60,
-                               time.threshold = 10, time.units = "mins")
+# Calculate home coordinates based on location data
+home <- findhome(gps.log,"lat","lon") 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# TODO: create own code for this based on paper, eliminating any plyr functions
+library(plyr)
+mobility_stay_test<- stayevent(gps.log, 
+                               coor = c("lon","lat"), time = "timestamp",
+                               dist.threshold = 30, time.threshold = 10,
+                               time.units = "mins")
+detach(package:plyr)
 
 # create group column in main dataset with results from stay event detection above 
-gps.traj %<>% mutate(stayeventgroup=mobility_stay_test$stayeventgroup)  %<>% 
+gps.traj <- gps.log %>% mutate(stayeventgroup=mobility_stay_test$stayeventgroup)  %<>% 
   mutate(stay=(!is.na(stayeventgroup))*1)  %<>% # create binary "stay" group 
   mutate(staygo_group=cumsum(c(0,abs(diff(stay))))+1) # allocate a group number for all stay and go events (counts up)
 
 # Stay events: get centroids and times
-detach(package:plyr) #need to find out whether I need plyr at all
 stay.info <- gps.traj %>%
   filter(stay==1) %>%
   group_by(staygo_group) %>%
@@ -158,14 +187,15 @@ remove(mobility_stay_test,p1,p2)
 # TODO: get google map in the background using ggmap and ggplotly, see 2.2.4 here: http://plotly-book.cpsievert.me/maps.html
 # TODO: make traces have proper names
 
-# Plot stay centroids and home:
+# Plot stay centroids and home: 
+#TODO fix this!
 plot_ly(stay.info,
         x=~c.lon,
         y=~c.lat,
         color = ~home,
         type = "scatter",
         mode = "markers") %>%
-add_trace(x=home$lon4, y=home$lat4, name='detected home', color = NA, marker = list(color = 'red'))
+add_trace(data.frame(home), x=home[2], y=home[1], name='detected home', color = NA, marker = list(color = 'red'))
 
 # Calculate time spent at home and/or out of home
 
@@ -211,8 +241,36 @@ plot_ly(gps.traj,
 # todo: look at the "mobility boundaries" from the assessment. Should I be calculating this?
 # todo: create time/day plot with colours showing whether it is "home","out" or "go" events
 
+# DEBUGGING AREA ----
 
+test <- gps.traj
+coordinates(test) <- ~ lon + lat
+proj4string(test) <- "+init=epsg:4326"
+
+#mapview(test)
+
+#mapview(test,zcol = "event_type", burst = TRUE) 
+
+mapview(test,zcol = "staygo_group", burst = TRUE) 
   
+# for debugging
+testdist<-distVincentyEllipsoid(select(gps.traj,lat,lon), a=6378137, b=6356752.3142, f=1/298.257223563)
+gps.traj %<>% mutate(dist=c(NA,testdist))
+gps.traj%<>%mutate(intervals=intervals*60)
+
+# Issue (2): Anomolies breaking up stays so that not detected based on time interval not being long enough
+# Solution: one cause is low accuracy points that can be filtered out, e.g. by removing all points with accurace less than 30m. To justify this number, can show density distributions plots.
+
+# Get relevant data to see problem
+bob<-datasets.all$location %>% select(lat, lon, timestamp, intervals.alt, dsource,accuracy) %>%
+  filter(timestamp>=as.POSIXct("2018-02-14"), timestamp<=as.POSIXct("2018-02-15"))
+
+# Show distributions indicating that selecting 30m as an upper limit will keep most of the data
+hist(bob$accuracy,breaks=100) # histogram of gps data accuracies
+d <- density(bob$accuracy) # returns the density data 
+plot(d) # plots the results
+
+# End of DEBUGGING AREA ---
 
 # Plot results overlaid over GPS trace for all datapoints:
 plot_ly(gps.traj,
@@ -289,3 +347,6 @@ plot_ly(xy,
 # Standard Deviation Elipse
 # A function exists in python, need to find or write for R, eg using this explanation:
 # http://desktop.arcgis.com/en/arcmap/10.3/tools/spatial-statistics-toolbox/h-how-directional-distribution-standard-deviationa.htm
+
+
+

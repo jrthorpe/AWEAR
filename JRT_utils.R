@@ -81,9 +81,10 @@ restructure <- function(dat, userid, d.start, d.stop) {
 
   # Add new columns that are useful for the plotting and algorithms to come:
   # to do: include inputs to the function to indicate which new columns are desired
+  #browser()
   dat %<>% 
     mutate(intervals = c(NA,(diff(timestamp)/(60*60)))) %>% # intervals between readings in hours
-    mutate(intervals.alt = c(NA,(diff(timestamp)/(60*60)))) %>% # intervals between readings in hours
+    mutate(intervals.alt = c(NA,difftime(tail(timestamp,-1),head(timestamp,-1),units="mins"))) %>% # intervals between readings in hours
     mutate(dates = as.character.Date(as.Date(dat$timestamp))) %>%  # dates
     mutate(times = as.POSIXct(strftime(dat$timestamp, format="%H:%M:%S"), format="%H:%M:%S")) %>%  # add times for plotting time on y axis (note: to get the times in the right format, they are all just assigned the same date)
     mutate(index = c(1:nrow(dat))) # index for testing purposes

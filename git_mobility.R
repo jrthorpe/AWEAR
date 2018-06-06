@@ -150,6 +150,11 @@ grouptime<- function(df, time = NULL, units = c("auto", "secs", "mins", "hours",
   }
   #browser()
   if (!is.null(groupvar)){
+    # JRT -- need to rewrite without ddply (so that I can avoid plyr package)
+    # the step below splits df up into separate dataframes for each "groupvar"
+    # (in this case "distgroup"), then calculates the time difference between
+    # first and last row within each group. This is presumably to get the
+    # durations of stay events.
     df3<- ddply(df, .(get(groupvar)), function(z){
       data.frame(timediff = as.numeric(difftime(z[nrow(z),time], z[1,time]), units = units))
     })
@@ -277,10 +282,11 @@ seqgroup<- function(df, var = NULL) {
 stayevent<- function (df, coor = NULL, time = NULL, dist.threshold = NULL, time.threshold = NULL, 
                       time.units = c("auto", "secs", "mins", "hours", "days", "weeks"), 
                       groupvar = NULL, ...) {
+  #browser()
   df$distgroup<- groupdist(df, coor = coor, threshold = dist.threshold, groupvar = groupvar)
   df$timegroup<- grouptime(df, time = time, units = time.units, threshold = time.threshold, groupvar = "distgroup")
   df$stayeventgroup<- ifelse(!is.na(df$distgroup) & df$timegroup == 1, df$distgroup, NA)
-  #browser()
+  
   stayevents<- aggregate(cbind(get(coor[1]), get(coor[2]))~stayeventgroup, df, mean)
   names(stayevents)<- c("stayeventgroup", "stayeventlon", "stayeventlat")
   
