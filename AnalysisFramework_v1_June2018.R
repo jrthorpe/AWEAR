@@ -10,9 +10,6 @@
 
 # SETUP -------------------------------------------------------------------------------------------
 # Set the drive, load packages and functions.
-
-#setwd("M:/PhD_Folder/CaseStudies/Data_analysis/source")
-
 ## For mobility pack (downloaded from Git) -- maybe don't need these anymore?
 #library(DataCombine)
 #library(zoo)
@@ -34,6 +31,11 @@ library(caTools)
 library(geosphere) # added in v3 of data checker
 library(mapview) # added in v1 of analysis framework
 
+# For DBSCAN clustering
+library(fpc)
+library(dbscan)
+library(factoextra)
+
 # Load custom functions:
 source("M:/PhD_Folder/CaseStudies/Data_analysis/source/JRT_utils.R")
 #source("git_mobility.R")
@@ -41,7 +43,8 @@ source("M:/PhD_Folder/CaseStudies/Data_analysis/source/jrt_mobility.R")
 
 # Define constants:
 folder <- "M:/PhD_Folder/CaseStudies/Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
-not.in.use <- c("bluetooth","hardware_info","wearable","wifi","calllog","sms")
+not.in.use <- c("activity", "battery", "experience_sampling", "screen", "step_count", #for when only using location data
+                "bluetooth","hardware_info","wearable","wifi","calllog","sms")
 to_plot <- c("activity", # from data checker, for debugging purposes only (visualise all datasets)
              "battery",
              "exps",
@@ -91,153 +94,133 @@ remove(d.start, d.stop, folder, not.in.use, userid, users)
 # Moblity Setup: create datasets and variables required for mobility calculations -------
 
 # Preprocessing steps
-gps.log.pre <- datasets.all$location %>% filter(accuracy<=50) # get rid of data points with an "accuracy" above 50m
+gps.log.pre <- datasets.all$location %>% filter(accuracy<=25) # get rid of data points with an "accuracy" above 50m
 keep.ratio <- nrow(gps.log.pre)/nrow(datasets.all$location)
 
 # Get GPS log file
 gps.log <- gps.log.pre %>% 
   select(lat, lon, timestamp, intervals.alt, dates, times) %>% 
-  filter(timestamp>=as.POSIXct("2018-02-13"), timestamp<=as.POSIXct("2018-02-14")) # reduce to single day
+  filter(timestamp>=as.POSIXct("2018-02-06"), timestamp<=as.POSIXct("2018-02-07")) # reduce to single day
 
 # Calculate home coordinates based on location data
 home <- find_home(gps.log,"lat","lon")
 
 # STAY DETECTION (to be moved into separate function) ====
 
+# OPEN ISSUES:
+
+# 1. Jumps in stays:
+# If there is a big time gap, and then another stay, they can be land up as one
+# stay because there is no "go" data inbetween them. Therefore need to test the
+# total distance size of each stay event and split if too big (or some other
+# solution)
+
+# NOTES:
+
+# An advantage of the method is not needing to have even spaced data or
+# clean/filter to create it (as with Cuttone's 15 minutes intervals). THis is
+# also the reason why I can't split data by distance threshold, the data is not
+# spaced 15 minutes apart, so a distance threshold is not sensible. Of course
+# someone moves less than 60m if the measurements are spaced seconds apart.
+
 ##* Initial identification of stays -----
 
-dT <- 10  # delta T, time window in minutes
-dD <- 100 # delta D, distance threshold in meters
+# Define variables:
+dT <- 5  # delta T, time window in minutes
+dD <- 100 # delta D, diagonal distance boundary in meters
+min.time.stay <- 10 # minimum duration of a stay, in minutes
+time.threshold.go <- 10 # cut-off for filtering out "go" events to/from same location, in minutes
+dist.threshold <- 30 # distance in meters within which two centriods belong to same stay location
 
-is.stay <- vector(mode = "logical", length = nrow(gps.log)) 
-i <- 1
-while (i <= nrow(df)){
-  
-  # get all GPS data points in a timeframe of deltaT
-  points <- df %>% 
-    filter(timestamp>=timestamp[i], timestamp<=timestamp[i]+deltaT*60) %>%
-    select(lat, lon)
-  
-  # diagonal distance across bounding box enclosing the selected points
-  bob <- data.frame(bbox(SpatialPoints(points)))
-  ddistance <- distGeo(bob$min, bob$max, a=6378137, f=1/298.257223563) #diagonal distance across bounding box
-  
-  # if distance below threshold all points are "stay", otherwise current point is "go"
-  if(ddistance <= deltaD){ 
-    is.stay[i:(i+nrow(points)-1)] <- TRUE
-    i <- (i+nrow(points)) # go to next point after current stay set
-  } else{
-    is.stay[i] <- 0
-    i <- (i+1) # go to next point
-  }
-  
-}
 
-# Create trajectories data frame indicating if stay/go and with stay/go event numbers 
-gps.traj <- cbind(gps.log,is.stay) %>%
-  mutate(event.id = cumsum(c(0,abs(diff(is.stay))))+1) # assign a number to each stay or go event
+gps.traj <- get_stays(gps.log, dT, dD) 
 
-# Summarise stay and go events
-event.summary <- gps.traj %>% group_by(event.id) %>%
-  summarize(T.start = min(timestamp), is.stay = max(is.stay)) %>% 
+# NOTE: removed as this might not be necessary at this stage, could do once at the end
+#
+# # Summarise stay and go events
+# gps.traj %>% mutate(event.id = cumsum(c(0,abs(diff(is.stay))))+1) # assign a number to each stay or go event
+# 
+# event.summary <- gps.traj %>% group_by(event.id) %>%
+#   summarize(T.start = min(timestamp), is.stay = max(is.stay)) %>% 
+#   mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
+#   mutate(durations = difftime(T.end,T.start, units = "mins"))
+
+# TODO: Missing a "clean up" step here:
+
+# The stays need to have a few checks, e.g. to make sure they span longer than X and have a small distance.
+
+
+## ________________________________________
+
+##* Spatial clustering to identify stay locations -----
+
+clusters <- cluster_spatial(gps.traj,dist.threshold)
+
+# append info to gps.traj
+gps.traj %<>% mutate(loc.id=clusters) %>%
+  mutate(traj.event=get_events(loc.id))
+
+traj.summary <- gps.traj %>% group_by(traj.event) %>%
+  summarize(T.start = min(timestamp), is.stay = min(is.stay), loc.id = mean(loc.id)) %>%
   mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
   mutate(durations = difftime(T.end,T.start, units = "mins"))
 
-# Calculate centroids of all stay events
-stay.centroids <- gps.traj %>% filter(is.stay==1) %>% 
-  group_by(event.id) %>%
-  summarize(c.lat = mean(lat, na.rm=TRUE), c.lon = mean(lon, na.rm = TRUE))
+# # OLD!
+# # Calculate centroids of all stay events
+# stay.centroids <- gps.traj %>% filter(is.stay==1) %>% group_by(event.id) %>%
+#   summarize(lat = mean(lat, na.rm=TRUE), lon = mean(lon, na.rm = TRUE))
+# 
+# # Get groups of stays belongs to same location, and assign ID's to each stay location
+# merges <- merge_spatial(stay.centroids,dist.threshold)
+# event.summary %<>% mutate(stay.id = ifelse(is.stay,event.id,NA))
+# for (m in merges){
+#  print(m)
+#   event.summary[(event.summary$event.id %in% m),"stay.id"] <- m[[1]]
+# }
 
 ## ________________________________________
 
-##* Merge spatially close stays -----
+##* Temporal clustering -----
 
-# identify any stays that are "home" based on proximity to home centroid
-dist_threshold <- 30 # 
-stay.centroids %<>% 
-  mutate(dist2home=distGeo(rev(home),
-                           stay.centroids[,c("c.lon","c.lat")],
-                           a=6378137, f=1/298.257223563)) %>% 
-  mutate(is.home=dist2home<dist_threshold) 
+merge.temporal <- merge_temporal(traj.summary,time.threshold.go)
 
-#   %>%  
-#   mutate(c.lon = ifelse(is.home, home[1],c.lon), # assign "home" coordinates to any points close to home
-#          c.lat = ifelse(is.home, home[2],c.lat))
 
-# merge any other close centroids
-centroids.pool <- filter(stay.centroids,is.home==FALSE) # get all non-home stay centroids
-merges<-list()
-
-while (nrow(centroids.pool)>1) {
-  
-  # select first point in the set and calculate distances to all others
-  tmp <- select(centroids.pool[1,],c.lon,c.lat)
-  distances <- distGeo(tmp, select(centroids.pool,c.lon,c.lat), a=6378137, f=1/298.257223563)
-  
-  # test distances against threshold
-  is.close <- distances<dist_threshold
-  
-  # store group numbers of any close stay events
-  if (sum(is.close)>1){
-    #merges[[paste0("event.id",centroids.pool$event.id[1])]] <- filter(centroids.pool,is.close) %>%
-    merge.set <- filter(centroids.pool,is.close) %>%
-      select(event.id)
-    merges <- c(merges, merge.set)
-  } 
-  
-  # remove current centroid and any that are merged
-  centroids.pool %<>% filter(!is.close)  #(note: the current centroid is filtered out as it is close to itself)
-
-  }
-
-# TODO: the below is messy with messy results, need to fix up (the stay id column creation is long winded and results in quite random ID's)
-# create a "stay ID" column to be distinct from a stay event
-home.set <- stay.centroids %>% filter(is.home)  %>% select(event.id)
-event.summary  %<>% mutate(stay.id = ifelse(event.id %in% home.set$event.id,"home",event.id))
-
-for (m in merges){
-  #print(c(1,2,21,3,4,5,6,7,8,9,12,11,12) %in% m)
-  event.summary  %<>% mutate(stay.id = ifelse(event.id %in% m, paste0("S",m[1]), stay.id) )
+# update gps.traj
+for(m in 1:nrow(merge.temporal)){
+  tmp <- gps.traj$traj.event==merge.temporal[m,"traj.event"]
+  gps.traj[tmp,"loc.id"] <- merge.temporal[m,"loc.id"]
 }
-event.summary  %<>% mutate(stay.id = ifelse(event.id %in% stay.centroids$event.id,stay.id,NA))
+gps.traj %<>% mutate(traj.event=get_events(loc.id))
 
-remove(merges, merge.set)
+# update traj summary
+traj.summary.rev1 <- gps.traj %>% group_by(traj.event) %>%
+  summarize(T.start = min(timestamp), is.stay = median(is.stay), loc.id = mean(loc.id)) %>%
+  mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
+  mutate(durations = difftime(T.end,T.start, units = "mins"))
 
-#NB: TODO need to look into whether "stay.centroids" and "event.summary" now have outdated id's etc
+
+# 
+# event.summary$is.stay[event.summary$event.id %in% merge.temporal$event.id] <- 1
+# event.summary$stay.id[event.summary$event.id %in% merge.temporal$event.id] <- merge.temporal$stay.id
 
 ## ________________________________________
 
-##* Merge temporaly close stays -----
+##* Update trajectories and events -----
 
-# Eliminate "go" events if: 
-# (1) they start and end at same place, AND
-# (2) are less than 5 minutes
-
-
-
-cond1 <- filter(event.summary,!is.stay,durations<=5) %>%
-  select(event.id)
-
-stay.before <- filter(event.summary,event.id %in% (cond1$event.id-1)) %>% select(stay.id)
-stay.after <- filter(event.summary,event.id %in% (cond1$event.id+1)) %>% select(stay.id)
-
-cond2 <- cond1[stay.before==stay.after,]
-
-merge.temporal <- cbind(cond2,stay.before[stay.before==stay.after,])
-
-# update event summary and gps.traj
-event.summary$is.stay[event.summary$event.id %in% merge.temporal$event.id] <- 1
-event.summary$stay.id[event.summary$event.id %in% merge.temporal$event.id] <- merge.temporal$stay.id
-
+# get event ids of all stays:
+stays.after.merge <- event.summary %>% filter(is.stay==1) %>% select(event.id)
 
 # udpate is.stay results
-gps.traj$is.stay[gps.traj$event.id %in% merge.temporal$event.id] <- 1
+gps.traj.updated <- gps.traj %>% select(timestamp,lat,lon,intervals.alt,dates,times) %>% 
+  mutate(is.stay = (gps.traj$event.id %in% stays.after.merge$event.id)) %>%
+  mutate(stay.id = event.summary$stay.id[match(gps.traj$event.id, event.summary$event.id)])%>% 
+  mutate(event.id = cumsum(c(0,abs(diff(is.stay))))+1) # assign a number to each stay or go event
 
-# recalculate events
-
-gps.traj %<>% mutate(event.id.updated = cumsum(c(0,abs(diff(is.stay))))+1) # assign a number to each stay or go event
-
-
+# Summarise updated stay and go events
+event.summary.updated <- gps.traj.updated %>% group_by(event.id) %>%
+  summarize(T.start = min(timestamp), is.stay = max(is.stay), stay.id = mean(stay.id)) %>% 
+  mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
+  mutate(durations = difftime(T.end,T.start, units = "mins"))
 
 # end of stay detection algorithm ---
 
@@ -405,8 +388,8 @@ plot_ly(gps.traj,
         y=~cum_dist,
         #name="cumulative distance (m)",
         type = "scatter",
-        mode = "lines",
-        color = ~as.factor(event.id),
+        mode = "markers",
+        color = ~as.factor(loc.id),
         colors = "Set3" )  %>%
   add_trace(x=~timestamp,
             y=~distances,
@@ -426,7 +409,7 @@ plot_ly(gps.traj,
         y=~lat,
         type = "scatter",
         mode = "markers",
-        color = ~event.id.updated)
+        color = ~as.factor(loc.id))
 
 plot_ly(gps.traj,
         x=~lon,
@@ -438,7 +421,12 @@ plot_ly(gps.traj,
 mappoints <- gps.traj
 coordinates(mappoints) <- ~ lon + lat
 proj4string(mappoints) <- "+init=epsg:4326"
-mapview(mappoints, zcol = "event.id.updated", burst = TRUE, map.types = "OpenStreetMap") 
+mapview(mappoints, zcol = "is.stay", burst = TRUE, map.types = "OpenStreetMap") 
+mapview(mappoints)
+mapview(mappoints, zcol = "loc.id", burst = TRUE)
+
+mapview(mappoints, zcol = "stay.id", burst = TRUE, map.types = "OpenStreetMap") 
+
 
 # LIFESPACE (DIST/AREA METRICS) ----
 
@@ -471,6 +459,28 @@ plot_ly(xy,
 # http://desktop.arcgis.com/en/arcmap/10.3/tools/spatial-statistics-toolbox/h-how-directional-distribution-standard-deviationa.htm
 
 # DISCARDED ----
+
+
+
+# MERGING CLOSE CENTROIDS:  
+# Here I first identify which centroids are home then group the rest. This seems
+# overly complicated, so will group all instead and can identify home later.
+
+# # identify any stays that are "home" based on proximity to home centroid
+# stay.centroids %<>% 
+#   mutate(dist2home=distGeo(rev(home),
+#                            stay.centroids[,c("c.lon","c.lat")],
+#                            a=6378137, f=1/298.257223563)) %>% 
+#   mutate(is.home=dist2home<dist_threshold) 
+# 
+# # merge any other close centroids
+# centroids.pool <- filter(stay.centroids,is.home==FALSE) # get all non-home stay centroids
+# merges<-list()
+#
+# # then later editing stay id's
+# home.set <- stay.centroids %>% filter(is.home)  %>% select(event.id)
+# event.summary  %<>% mutate(stay.id = ifelse(event.id %in% home.set$event.id,"home",event.id))
+
 
 
 # NEXT STEPS: (NO LONGER NECESSARY)
