@@ -155,16 +155,22 @@ merge_spatial <- function(points, dist.threshold){
 
 # MERGE STAYS: TEMPORAL PROXIMITY ----
 
-merge_temporal <- function(traj.summary, time.threshold) {
-  # Find "go" events that: 
-  # (1) are less than 5 minutes, AND
-  # (2) start and end at same location
+merge_temporal <- function(traj.summary, time.threshold.stay, time.threshold.go) {
+  # Merge stays that are broken up by very short "go" events; and merge "go" events that are split by very short "stays"
+  # This can also be interpreted as filtering out too short go and stay events.
   
   # traj.summary: requires columns is.stay, durations, traj.segment, loc.id
   # time threshold: 
   
+  
+  
+  # Find "go" events that: 
+  # (1) are less than 5 minutes, AND
+  # (2) start and end at same location
+  
+    
   # Get all "go" segments below time threshold
-  cond1 <- filter(traj.summary, !is.stay, durations <= 5) %>%
+  cond1 <- filter(traj.summary, !is.stay, durations <= time.threshold.go) %>%
     select(traj.event)
   
   # Get the loc.id's of stays before and after each of the short "go" events
@@ -176,8 +182,17 @@ merge_temporal <- function(traj.summary, time.threshold) {
   # Test whether the "go" starts and ends at the same location
   cond2 <- cond1[stay.before == stay.after, ]
   
-  # Get the stay ID that the identified "go" points should be assigned to
-  merge.temporal <- cbind(cond2, stay.before[stay.before == stay.after, ])
+  # Append the loc ID that the identified "go" points should be assigned to
+  go.remove <- cbind(cond2, stay.before[stay.before == stay.after, ])
+  
+  
+  # Find "stay" events of duration below a time threshold and convert to "go":
+  cond3 <- filter(traj.summary, is.stay, durations <= time.threshold.stay) %>%
+    select(traj.event)
+  stay.remove <- cbind(cond3,loc.id=0)
+  
+  # Append the filtered stays to the filtered gos
+  merge.temporal <- rbind(go.remove,stay.remove)
   
   return(merge.temporal)
   

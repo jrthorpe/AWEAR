@@ -64,11 +64,11 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 ```{r Settings, echo=FALSE}
 
 # Select user
-userid <- users$P13NB
+userid <- users$verena
 
 # Set period of interest
-d.start <- as.POSIXct("2018-05-28") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-06-15")
+d.start <- as.POSIXct("2018-01-23") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-05-10")
 
 cat("This report is for user ", names(users[users==userid]), "for the time period from ", as.character(d.start), " to ", as.character(d.stop)) 
 
@@ -103,6 +103,10 @@ datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any nul
 
 #test<-filter(datasets.all$activity, user=="f9f24838-c844-42d4-8343-b20ebdd220f3")
 
+# Save dataset
+saveRDS(datasets.all, file = paste0("M:/PhD_Folder/CaseStudies/Data_analysis/Participants_Rdata/",
+                                    names(users[users==userid]),"_",d.start,"_to_",d.stop,".Rds"))
+
 ```
 
 
@@ -115,7 +119,10 @@ for (i in 1:length(datasets.all)){
   if(!is.null(j)){
     cat("Data in ",names(datasets.all)[i],"comes from ", distinct(j,dsource)[,1],"\n");
     cat("Last reading in",names(datasets.all)[i],"is on",capture.output(max(j$timestamp)),"\n\n");
-  }
+   
+    assign(paste0("tally.",names(datasets.all)[i]), j %>% count(dates))
+    
+    }
 }
 ```
 
@@ -132,6 +139,13 @@ results<-show_plots(datasets.all, to_plot)
 for(i in 1:length(results)){
   print(results[[i]])
 }
+
+plot_ly(tally.activity,x=~dates,y=~n, type="bar") %>% layout(title="activity")
+plot_ly(tally.battery,x=~dates,y=~n, type="bar") %>% layout(title="battery")
+plot_ly(tally.experience_sampling,x=~dates,y=~n, type="bar") %>% layout(title="ES")
+plot_ly(tally.location,x=~dates,y=~n, type="bar") %>% layout(title="location")
+plot_ly(tally.screen,x=~dates,y=~n, type="bar") %>% layout(title="screen")
+plot_ly(tally.step_count,x=~dates,y=~n, type="bar") %>% layout(title="steps")
 
 ```
 
