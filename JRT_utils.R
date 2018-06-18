@@ -58,8 +58,7 @@ restructure <- function(dat, userid, d.start, d.stop) {
     dat %<>% filter(user==userid)
     dat$user <- NULL # removes "user" column since this is not of interest when same for entire dataset
     cat("Complete: Data extracted for specified user \n");
-    } 
-  else{
+    } else{
     cat("User ID is not in dataset, returning NULL \n");
     return(NULL)
     }
@@ -67,17 +66,17 @@ restructure <- function(dat, userid, d.start, d.stop) {
   # Extract only the period of interest:
   if(d.start <= max(dat$timestamp) & d.stop >= min(dat$timestamp)){ #checks whether the period of interest overlaps with the timeframe in the dataset
     dat %<>% 
-      mutate(timestamp=as.POSIXct(timestamp,format="%Y-%m-%d %H:%M:%S")) %>% #NOTE: this just puts it into CEST format which is not correct, need to fix
+      #browser()
+      mutate(timestamp=as.POSIXct(timestamp,format="%Y-%m-%d %H:%M:%S",tz="GMT")) %>%
+      mutate(timestamp=as.POSIXct(format(timestamp,tz="CET"),tz="CET")) %>%
       filter(timestamp>=d.start, timestamp<=d.stop) %>%
       arrange(timestamp)
     cat("Complete: Data extracted for period of interest\n");
-  }
-  else{
+  } else{
     cat("No data for the specified user within the period of interest, returning NULL\n",
         "The specified user has data recorded between ", min(dat$timestamp), "and", max(dat$timestamp), "for this dataset.\n");
     return(NULL)
   }
-  
 
   # Add new columns that are useful for the plotting and algorithms to come:
   # to do: include inputs to the function to indicate which new columns are desired

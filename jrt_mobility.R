@@ -1,7 +1,3 @@
-
-
-
-
 # HOME LOCATION DETECTION ----
 find_home <- function(df,lat,lon){
   # Get "mode" of all points after dropping one decimal place (4 places)
@@ -16,6 +12,50 @@ find_home <- function(df,lat,lon){
   home <- as.numeric(select(loc.counts[1,],c(lat4,lon4)))
   
   return(home)
+}
+
+# TRAJECTORY EXTRACTION ("MOBILITY TRACES") // FULL STAY DETECTION ALGORITHM  ----
+get_trajectories <- function(gps.log,
+                            dT,dD,
+                            T.stay,T.go,
+                            dist.threshold){
+  ##* Initial identification of stays ---------
+  
+  gps.traj <- get_stays(gps.log, dT, dD) 
+  
+  ##* Spatial clustering to identify stay locations ---------
+  
+  # cluster all "stay" data points using density-based clustering (DBSCAN method)
+  clusters <- cluster_spatial(gps.traj,dist.threshold)
+  
+  # append info to gps.traj as location ID variable
+  gps.traj %<>% mutate(loc.id=clusters) %>%
+    mutate(traj.event=get_events(loc.id))
+  
+  # summarise the trajectories according to "stay" and "go" events, indicating locations
+  traj.summary <- gps.traj %>% group_by(traj.event) %>%
+    summarize(T.start = min(timestamp), is.stay = min(is.stay), loc.id = mean(loc.id)) %>%
+    mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
+    mutate(durations = difftime(T.end,T.start, units = "mins"))
+  
+  ##* Temporal clustering ---------
+  
+  # merge together stay or go events that are interrupted briefly 
+  merge.temporal <- merge_temporal(traj.summary,T.go=T.go, T.stay=T.stay)
+  
+  # assign all filtered events the corresponding stay location id (NOTE: loc.id is zero for "go" data)
+  for(m in 1:nrow(merge.temporal)){
+    tmp <- gps.traj$traj.event==merge.temporal[m,"traj.event"]
+    gps.traj[tmp,"loc.id"] <- merge.temporal[m,"loc.id"]
+  }
+  
+  # update traj.events based on revised loc.id column
+  gps.traj %<>% mutate(traj.event=get_events(loc.id))
+  
+  # --- end of mobility traces algorithm --- 
+
+  
+  return(gps.traj)
 }
 
 
@@ -155,7 +195,7 @@ merge_spatial <- function(points, dist.threshold){
 
 # MERGE STAYS: TEMPORAL PROXIMITY ----
 
-merge_temporal <- function(traj.summary, time.threshold.stay, time.threshold.go) {
+merge_temporal <- function(traj.summary, T.go, T.stay) {
   # Merge stays that are broken up by very short "go" events; and merge "go" events that are split by very short "stays"
   # This can also be interpreted as filtering out too short go and stay events.
   
@@ -170,7 +210,7 @@ merge_temporal <- function(traj.summary, time.threshold.stay, time.threshold.go)
   
     
   # Get all "go" segments below time threshold
-  cond1 <- filter(traj.summary, !is.stay, durations <= time.threshold.go) %>%
+  cond1 <- filter(traj.summary, !is.stay, durations <= T.go) %>%
     select(traj.event)
   
   # Get the loc.id's of stays before and after each of the short "go" events
@@ -187,7 +227,7 @@ merge_temporal <- function(traj.summary, time.threshold.stay, time.threshold.go)
   
   
   # Find "stay" events of duration below a time threshold and convert to "go":
-  cond3 <- filter(traj.summary, is.stay, durations <= time.threshold.stay) %>%
+  cond3 <- filter(traj.summary, is.stay, durations <= T.stay) %>%
     select(traj.event)
   stay.remove <- cbind(cond3,loc.id=0)
   

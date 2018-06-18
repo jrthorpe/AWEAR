@@ -64,11 +64,11 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 ```{r Settings, echo=FALSE}
 
 # Select user
-userid <- users$verena
+userid <- users$julia
 
 # Set period of interest
-d.start <- as.POSIXct("2018-01-23") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-05-10")
+d.start <- as.POSIXct("2018-06-01") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-06-14")
 
 cat("This report is for user ", names(users[users==userid]), "for the time period from ", as.character(d.start), " to ", as.character(d.stop)) 
 
@@ -104,8 +104,8 @@ datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any nul
 #test<-filter(datasets.all$activity, user=="f9f24838-c844-42d4-8343-b20ebdd220f3")
 
 # Save dataset
-saveRDS(datasets.all, file = paste0("M:/PhD_Folder/CaseStudies/Data_analysis/Participants_Rdata/",
-                                    names(users[users==userid]),"_",d.start,"_to_",d.stop,".Rds"))
+#saveRDS(datasets.all, file = paste0("M:/PhD_Folder/CaseStudies/Data_analysis/Participants_Rdata/",
+                                    #names(users[users==userid]),"_",d.start,"_to_",d.stop,".Rds"))
 
 ```
 

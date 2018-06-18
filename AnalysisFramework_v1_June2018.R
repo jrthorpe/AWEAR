@@ -9,12 +9,8 @@
 # This script ...
 
 # SETUP -------------------------------------------------------------------------------------------
-# Set the drive, load packages and functions.
-## For mobility pack (downloaded from Git) -- maybe don't need these anymore?
-#library(DataCombine)
-#library(zoo)
-#library(plyr)
 
+# Load packages and functions.
 library(data.table)
 library(dtplyr)
 library(dplyr)
@@ -38,8 +34,8 @@ library(factoextra)
 
 # Load custom functions:
 source("M:/PhD_Folder/CaseStudies/Data_analysis/source/JRT_utils.R")
-#source("git_mobility.R")
 source("M:/PhD_Folder/CaseStudies/Data_analysis/source/jrt_mobility.R")
+source("M:/PhD_Folder/CaseStudies/Data_analysis/source/metrics/mcp.R")
 
 # Define constants:
 folder <- "M:/PhD_Folder/CaseStudies/Data_dumps/dump_current_analysis/" # path to folder that holds multiple .csv files, downloaded from nightingale webportal
@@ -53,19 +49,28 @@ to_plot <- c("activity", # from data checker, for debugging purposes only (visua
              "steps")
 users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
               dean = "b1316280-38a6-45e1-9bb9-7afb2a1a2a96",
+              luna = "4afe61c5-c5cc-4de4-8f50-9499057668ad",
               per = "7bf5fec3-f46f-419e-9573-001fe9b47d81",
-              P01FA = "6321f7ef-a958-44ad-b8e5-5aa04bc004e1",
-              P03JJ = "e9f44eb5-8962-4894-83c6-783025c6eaea")
+              verena = "a0c74a88-b293-4b31-92c0-967502b28132",
+              agzam = "52152dda-0f54-46d1-affa-6dea85f840dc",
+              anja = "36f9d061-c5e9-4f30-91b2-83351ff40288",
+              #P01FA = "6321f7ef-a958-44ad-b8e5-5aa04bc004e1",
+              P03JJ = "e9f44eb5-8962-4894-83c6-783025c6eaea",
+              P06SS = "f9f24838-c844-42d4-8343-b20ebdd220f3",
+              P07MG = "4fbfddd0-a346-41c8-be8d-f8804b5068d3",
+              P08UH = "a85f299e-7a09-4ba7-bc19-8a200c2686c2",
+              P10JL = "d05fa984-8d3b-4405-b417-211d1a3f50d6",
+              P13NB = "75cc5240-7805-4550-aeae-873df9984710")
 
 # SETTINGS -------------------------------------------------------------------------------------------
 # Select user and period of interest:
 
-# Test users:
-userid <- users$julia
+# select user:
+userid <- users$P08UH
 
-# set the period of interest
-d.start <- as.POSIXct("2018-02-05") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-02-19")
+# set the period of interest:
+d.start <- as.POSIXct("2018-04-05") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-04-19")
 
 # IMPORT AND RESTRUCTURE DATA -------------------------------------------------------------------------------------------
 datasets.all <- get.data(folder, not.in.use) %>% 
@@ -74,109 +79,80 @@ datasets.all <- Filter(function(x) !is.null(x)[1],datasets.all) # remove any nul
 
 remove(d.start, d.stop, folder, not.in.use, userid, users)
 
-# VISUALISE DATA-------------------------------------------------------------------------------------------
+# VISUALISE DATA--------------------------------------
 
 #show_plots(datasets.all, to_plot)
 
-# MOBILITY -------------------------------------------------------------------------------------
+# MOBILITY  ==========================================
 
-# References: see files downloaded from GitHub. These use time and distance
-# between points against thresholds to assign points to "stay events", based on
-# work in an article by Zheng.
+#** Moblity Setup: create datasets and variables required for mobility calculations -------
 
-# -For each day: 
-#  .. Number of trips/stays
-#  .. Time spent out of / at home
-#  .. Distance covered in trajectories
-#  .. Plot the day: over time, plot a bar with "home", "transit", "location A", "location B" etc
-#  .. Work out how to annotate with the logbooks
-
-# Moblity Setup: create datasets and variables required for mobility calculations -------
-
-# Preprocessing steps
-gps.log.pre <- datasets.all$location %>% filter(accuracy<=25) # get rid of data points with an "accuracy" above 50m
-keep.ratio <- nrow(gps.log.pre)/nrow(datasets.all$location)
-
-# Get GPS log file
-gps.log <- gps.log.pre %>% 
-  select(lat, lon, timestamp, intervals.alt, dates, times) %>% 
-  filter(timestamp>=as.POSIXct("2018-02-06"), timestamp<=as.POSIXct("2018-02-07")) # reduce to single day
-
-# Calculate home coordinates based on location data
-home <- find_home(gps.log,"lat","lon")
-
-# STAY DETECTION (to be moved into separate function) ====
-
-# OPEN ISSUES:
-
-# 1. Jumps in stays:
-# If there is a big time gap, and then another stay, they can be land up as one
-# stay because there is no "go" data inbetween them. Therefore need to test the
-# total distance size of each stay event and split if too big (or some other
-# solution)
-
-# NOTES:
-
-# An advantage of the method is not needing to have even spaced data or
-# clean/filter to create it (as with Cuttone's 15 minutes intervals). THis is
-# also the reason why I can't split data by distance threshold, the data is not
-# spaced 15 minutes apart, so a distance threshold is not sensible. Of course
-# someone moves less than 60m if the measurements are spaced seconds apart.
-
-##* Initial identification of stays -----
-
-# Define variables:
+# define variables:
+loc.accuracy <- 25 # threshold for accuracy of location points in meters
 dT <- 5  # delta T, time window in minutes
 dD <- 100 # delta D, diagonal distance boundary in meters
 time.threshold.stay <- 10 # minimum duration of a stay, in minutes
 time.threshold.go <- 5 # cut-off for filtering out "go" events to/from same location, in minutes
 dist.threshold <- 30 # distance in meters within which two centriods belong to same stay location
+doi <- as.POSIXct("2018-04-06") # day of interest
 
-gps.traj <- get_stays(gps.log, dT, dD) 
+# preprocessing steps
+gps.log.pre <- datasets.all$location %>% filter(accuracy<=loc.accuracy) # get rid of data points with low accuracy
+keep.ratio <- nrow(gps.log.pre)/nrow(datasets.all$location)
 
+# GPS log file
+gps.log <- gps.log.pre %>% 
+  select(lat, lon, timestamp, intervals.alt, dates, times) %>% 
+  filter(timestamp>=doi, timestamp<=(doi %m+% days(1))) # get timeframe of just the day of interest
+remove(gps.log.pre)
 
-## ________________________________________
+# calculate home coordinates based on location data
+home <- find_home(gps.log,"lat","lon")
 
-##* Spatial clustering to identify stay locations -----
+#** Extract trajectories: get series of stay/go events ("mobility traces") ====
 
-clusters <- cluster_spatial(gps.traj,dist.threshold)
+# append trajectory information to the gps log file, including if the points is
+# a stay/go and location ID (note: all "go" points are assigned location ID of 0)
+gps.traj <- get_trajectories(gps.log,
+                            dT = dT,
+                            dD = dD,
+                            T.stay = time.threshold.stay,
+                            T.go = time.threshold.go,
+                            dist.threshold = dist.threshold)
 
-# append info to gps.traj
-gps.traj %<>% mutate(loc.id=clusters) %>%
-  mutate(traj.event=get_events(loc.id))
-
+# summarise all trajectory events
 traj.summary <- gps.traj %>% group_by(traj.event) %>%
-  summarize(T.start = min(timestamp), is.stay = min(is.stay), loc.id = mean(loc.id)) %>%
-  mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
-  mutate(durations = difftime(T.end,T.start, units = "mins"))
-
-## ________________________________________
-
-##* Temporal clustering -----
-
-merge.temporal <- merge_temporal(traj.summary,time.threshold.go)
-
-# update gps.traj
-
-# assign all filtered out "go" events the corresponding stay location id
-for(m in 1:nrow(merge.temporal)){
-  tmp <- gps.traj$traj.event==merge.temporal[m,"traj.event"]
-  gps.traj[tmp,"loc.id"] <- merge.temporal[m,"loc.id"]
-}
-
-gps.traj %<>% mutate(traj.event=get_events(loc.id)) # update traj.events based on revised loc.id column
-
-# update traj summary
-traj.summary.revised <- gps.traj %>% group_by(traj.event) %>%
   summarize(T.start = min(timestamp), is.stay = median(is.stay), loc.id = mean(loc.id)) %>%
   mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
   mutate(durations = difftime(T.end,T.start, units = "mins"))
 
+#** Plot results for visual confirmation ----
 
+# basic plot
+plot_ly(gps.traj,
+        x=~lon,
+        y=~lat,
+        type = "scatter",
+        mode = "markers",
+        color = ~as.factor(loc.id)) #or traj.event
 
-## ________________________________________
+# locations/events overlaid over GPS trace for all datapoints:
+plot_ly(gps.traj,
+        x=~lon, y=~lat,
+        type = "scatter",
+        mode = "lines+markers",
+        color = I('grey40')) %>%
+  add_trace(x=~lon, y=~lat,
+            type = "scatter",
+            mode = "lines+markers",
+            color = ~as.factor(traj.event), #or loc.id
+            colors = "Set1")
 
-# end of stay detection algorithm ---
+# map in background:
+mappoints <- gps.traj
+coordinates(mappoints) <- ~ lon + lat
+proj4string(mappoints) <- "+init=epsg:4326"
+mapview(mappoints, zcol = "traj.event", burst = TRUE, map.types = "OpenStreetMap") #or loc.id
 
 # METRICS CALCULATION ====
 
@@ -184,9 +160,8 @@ traj.summary.revised <- gps.traj %>% group_by(traj.event) %>%
 
 # Minimum convex polygon
 # Reference: http://mgritts.github.io/2016/04/02/homerange-mcp/
-source("metrics/mcp.R") #TODO: move to top
 
-xy <- select(location, lat, lon)
+xy <- select(gps.log, lat, lon)
 mcp.results <- get_mcp(xy, quantile=.99)
 
 mcp <- mcp.results$mcp
@@ -211,135 +186,56 @@ plot_ly(xy,
 # http://desktop.arcgis.com/en/arcmap/10.3/tools/spatial-statistics-toolbox/h-how-directional-distribution-standard-deviationa.htm
 
 
-
-
-
-
 #** Time spent at home and/or out of home ----
 
-# NOTE: This is all old code from before latest stay detection, could be that it is now much simpler!!!
+# -For each day: 
+#  .. Number of trips/stays
+#  .. Time spent out of / at home
+#  .. Distance covered in trajectories
+#  .. "Action Range"
+#  .. Plot the day: over time, plot a bar with "home", "transit", "location A", "location B" etc
+#  .. Work out how to annotate with the logbooks
 
-# To "fill in" nights at home, set arrive/depart times to midnight for the first and last home stays respectively
-N<-nrow(stay.info)
-if(stay.info$home[1]) stay.info$arrive[1] <- round(stay.info$arrive[1],"days")
-if(stay.info$home[N]) stay.info$depart[N] <- round(stay.info$depart[N],"days")
+# get centroids of all stay locations:
+stay.centroids <- gps.traj %>% filter(loc.id > 0) %>% group_by(loc.id) %>% 
+  summarize(c.lon = mean(lon),c.lat = mean(lat))
 
-# Get all "home" stay event durations
-stay.info %<>% mutate(durations=as.numeric(difftime(depart,arrive,units="hours")))
+# identify location id for home
+stay.centroids %<>% mutate(dist.home = distm(x=rev(home), 
+                                            y=select(stay.centroids,c.lon,c.lat), 
+                                            fun=distGeo))
 
-# Sum all home durations in hours
-time.home<-sum(stay.info$durations[stay.info$home])
+cat("closest stay location to detected home is: ",
+    round(min(stay.centroids$dist.home),2),"meters" )
 
-# PUWYLO:
-#TODO: create function to do this by day so it can be applied to dataset of any period
-# maybe: group_by day, then by event type (home, stay out, journey), then caculate durations
-home.groups <- (stay.info %>% filter(home) %>% select(staygo_group))[[1]]
-out.groups <- (stay.info %>% filter(!home) %>% select(staygo_group))[[1]]
+N.stay <- stay.centroids %>% filter(dist.home > min(dist.home)) %>% nrow()
+N.go <- traj.summary %>% filter(loc.id == 0) %>% nrow()
 
-gps.traj %<>% mutate(event_type=NA)
+# Time outside of home
+home.id <- stay.centroids %>% filter(dist.home == min(dist.home)) %>%
+  select(loc.id) %>% as.numeric()
 
-gps.traj$event_type[gps.traj$staygo_group %in% home.groups]="stay_home"
-gps.traj$event_type[gps.traj$staygo_group %in% out.groups]="stay_out"
-gps.traj$event_type[is.na(gps.traj$stayeventgroup)]="go"
-
-# gps.traj %<>% cbind(select(location,dates,times))
-
-plot_ly(gps.traj,
-        x=~dates %>% format.Date(format="%d/%m"),
-        y=~times %>% format.Date(format="%H:%M"),
-        type="scatter",
-        mode="markers",
-        color=~event_type,
-        #colors="Set1"
-        colors=c("orange","grey","black")) %>%
-  layout(yaxis = list(title = 'Time of day'),
-         xaxis = list(title = 'Date'))
-
-
-# todo: look at the "mobility boundaries" from the assessment. Should I be calculating this?
-# todo: create time/day plot with colours showing whether it is "home","out" or "go" events
-
-# USEFUL PLOTS ---------
-
-#** plot results overlaid over GPS trace for all datapoints:
-plot_ly(gps.traj,
-        x=~lon,
-        y=~lat,
-        type = "scatter",
-        mode = "lines+markers",
-        marker = list(size = 5),
-        line = list(width = 1),
-        color = I('grey40')) %>%
-  add_trace(x=~lon,
-            y=~lat,
-            type = "scatter",
-            mode = "markers",
-            marker = list(size = 10),
-            color = ~as.factor(stayeventgroup),
-            colors = "Set1")
-
-#** cumulative distance plot ----
-dist <- c(0, distGeo(gps.traj[c("lon","lat")],a=6378137, f=1/298.257223563)) #append 0 to keep same length (at the first point, no distance is covered)
-cum_dist<-cumsum(dist)
-gps.traj %<>% cbind(dist,cum_dist)
-
-plot_ly(gps.traj,
-        x=~timestamp,
-        y=~cum_dist,
-        #name="cumulative distance (m)",
-        type = "scatter",
-        mode = "markers",
-        color = ~as.factor(loc.id),
-        colors = "Set3" )  %>%
-  add_trace(x=~timestamp,
-            y=~distances,
-            type = "scatter",
-            mode = "lines",
-            color = I('black'))
-
-test <- stay.centroids
-coordinates(test) <- ~ c.lon + c.lat
-proj4string(test) <- "+init=epsg:4326"
-mapview(test,zcol = "is.home", burst = TRUE) 
-
-#** for visual checks of the stay/go events: ----
-
-plot_ly(gps.traj,
-        x=~lon,
-        y=~lat,
-        type = "scatter",
-        mode = "markers",
-        color = ~as.factor(loc.id))
-
-plot_ly(gps.traj,
-        x=~lon,
-        y=~lat,
-        type = "scatter",
-        mode = "markers",
-        color = ~stay.id)
-
-mappoints <- gps.traj
-coordinates(mappoints) <- ~ lon + lat
-proj4string(mappoints) <- "+init=epsg:4326"
-mapview(mappoints, zcol = "is.stay", burst = TRUE, map.types = "OpenStreetMap") 
-mapview(mappoints)
-mapview(mappoints, zcol = "loc.id", burst = TRUE)
-
-mapview(mappoints, zcol = "stay.id", burst = TRUE, map.types = "OpenStreetMap") 
-
+T.not.home <- 
+  sum((traj.summary %>% filter(loc.id != home.id))$durations) %>% as.numeric() # duration of all events out of home
+T.go <- 
+  sum((traj.summary %>% filter(loc.id == 0))$durations) %>% as.numeric() # duration of all "go" events
+T.stay.out <- 
+  sum((traj.summary %>% filter((loc.id != home.id) & (loc.id > 0)))$durations) %>% as.numeric() # duration of all "stays" outside home
 
 # DEBUGGING AREA ----
 
-# Issue (2): Anomolies breaking up stays so that not detected based on time interval not being long enough
-# Solution: one cause is low accuracy points that can be filtered out, e.g. by removing all points with accurace less than 30m. To justify this number, can show density distributions plots.
+# Issue (2): Anomolies breaking up stays so that not detected based on time
+# interval not being long enough Solution: one cause is low accuracy points that
+# can be filtered out, e.g. by removing all points with accurace less than 25m.
+# To justify this number, can show density distributions plots.
 
 # Get relevant data to see problem
-bob<-datasets.all$location %>% select(lat, lon, timestamp, intervals.alt, dsource,accuracy) %>%
+testInheritedMethods()<-datasets.all$location %>% select(lat, lon, timestamp, intervals.alt, dsource,accuracy) %>%
   filter(timestamp>=as.POSIXct("2018-02-14"), timestamp<=as.POSIXct("2018-02-15"))
 
 # Show distributions indicating that selecting 30m as an upper limit will keep most of the data
-hist(bob$accuracy,breaks=100) # histogram of gps data accuracies
-d <- density(bob$accuracy) # returns the density data 
+hist(test$accuracy,breaks=100) # histogram of gps data accuracies
+d <- density(test$accuracy) # returns the density data 
 plot(d) # plots the results
 
 # End of DEBUGGING AREA ---
