@@ -15,47 +15,55 @@ find_home <- function(df,lat,lon){
 }
 
 # TRAJECTORY EXTRACTION ("MOBILITY TRACES") // FULL STAY DETECTION ALGORITHM  ----
-get_trajectories <- function(gps.log,
-                            dT,dD,
-                            T.stay,T.go,
+get_trajectories <- function(df,
+                            dT,
+                            dD,
+                            T.stay,
+                            T.go,
                             dist.threshold){
   ##* Initial identification of stays ---------
-  
-  gps.traj <- get_stays(gps.log, dT, dD) 
+  #browser()
+  traj <- get_stays(df, dT, dD) 
   
   ##* Spatial clustering to identify stay locations ---------
   
   # cluster all "stay" data points using density-based clustering (DBSCAN method)
-  clusters <- cluster_spatial(gps.traj,dist.threshold)
+  clusters <- cluster_spatial(traj,dist.threshold)
   
   # append info to gps.traj as location ID variable
-  gps.traj %<>% mutate(loc.id=clusters) %>%
+  traj %<>% mutate(loc.id=clusters) %>%
     mutate(traj.event=get_events(loc.id))
+  traj %<>% mutate_cond(loc.id == 0, is.stay = 0) # uupdate is.stay column where outliers are now "go" points
   
   # summarise the trajectories according to "stay" and "go" events, indicating locations
-  traj.summary <- gps.traj %>% group_by(traj.event) %>%
+  traj.summary <- traj %>% group_by(traj.event) %>%
     summarize(T.start = min(timestamp), is.stay = min(is.stay), loc.id = mean(loc.id)) %>%
-    mutate(T.end = c(T.start[-1],max(gps.traj$timestamp))) %>%
+    mutate(T.end = c(T.start[-1],max(traj$timestamp))) %>%
     mutate(durations = difftime(T.end,T.start, units = "mins"))
   
   ##* Temporal clustering ---------
-  
+  #browser()
   # merge together stay or go events that are interrupted briefly 
   merge.temporal <- merge_temporal(traj.summary,T.go=T.go, T.stay=T.stay)
   
+  #browser()
+  if(nrow(merge.temporal)>0){
   # assign all filtered events the corresponding stay location id (NOTE: loc.id is zero for "go" data)
   for(m in 1:nrow(merge.temporal)){
-    tmp <- gps.traj$traj.event==merge.temporal[m,"traj.event"]
-    gps.traj[tmp,"loc.id"] <- merge.temporal[m,"loc.id"]
+    tmp <- traj$traj.event==merge.temporal[m,"traj.event"]
+    traj[tmp,"loc.id"] <- merge.temporal[m,"loc.id"]
   }
+    
+  # update is.stay column where stays become goes or vice versa based on new loc.id
+  traj %<>% mutate(is.stay = ifelse(loc.id == 0, 0, 1)) 
   
   # update traj.events based on revised loc.id column
-  gps.traj %<>% mutate(traj.event=get_events(loc.id))
-  
+  traj %<>% mutate(traj.event=get_events(loc.id))
+  }
   # --- end of mobility traces algorithm --- 
 
   
-  return(gps.traj)
+  return(traj)
 }
 
 
@@ -99,9 +107,9 @@ get_stays <- function(df, deltaT, deltaD){
   }
   
   # Create trajectories data frame indicating if stay/go and with stay/go event numbers 
-  gps.traj <- cbind(gps.log,is.stay) 
+  stays <- cbind(df,is.stay) 
   
-  return(gps.traj)
+  return(stays)
   
 }
 
@@ -109,9 +117,7 @@ get_events <- function(dat){
   # explain function...
 
   # Inputs explained:
-  # gps.traj: required inputs are is.stay and/or loc.id
-  # split.by: name of column to use when splitting trajectory into events
-  # dat: data containing information based upon which events are created (e.g. stays or locations)
+  # dat: column from trajectories data frame that describes movements, e.g. is.stay or loc.id
   
   #dat <- gps.traj[,split.by]
   change.detect <- c(0,diff(dat)!=0)
@@ -125,7 +131,7 @@ get_events <- function(dat){
 
 # MERGE STAYS: SPATIAL PROXIMITY ----
 
-cluster_spatial <- function(gps.traj, dist.threshold){
+cluster_spatial <- function(df, dist.threshold){
   # explain function...
   # Note: used distance matrix as an input to ensure the use of distances that are meaningful for GPS data
 
@@ -133,7 +139,7 @@ cluster_spatial <- function(gps.traj, dist.threshold){
   # gps.traj: required inputs are lon,lat,is.stay
   # dist.threshold:
 
-  points <- gps.traj %>% filter(is.stay==1) %>% select(lon,lat) # get GPS coords
+  points <- df %>% filter(is.stay==1) %>% select(lon,lat) # get GPS coords
   distances <- distm(points, fun=distGeo) # get a distance matrix of all points to all other points
   min.points <- 2 # specify MinPts parameter for clusterering algorithm "dbscan"
 
@@ -151,8 +157,8 @@ cluster_spatial <- function(gps.traj, dist.threshold){
 
   # Get clusters vector for gps.traj
   
-  clusters <- vector(mode="numeric",length = nrow(gps.traj)) # vector of zeros
-  clusters[gps.traj$is.stay==1] <- db$cluster # cluster ID's assigned to stay rows, outliers are 0 therefore become same as "go" points.
+  clusters <- vector(mode="numeric",length = nrow(df)) # vector of zeros
+  clusters[df$is.stay==1] <- db$cluster # cluster ID's assigned to stay rows, outliers are 0 therefore become same as "go" points.
   #clusters[gps.traj$is.stay==0] <- -1
 
   return(clusters)
@@ -208,11 +214,15 @@ merge_temporal <- function(traj.summary, T.go, T.stay) {
   # (1) are less than 5 minutes, AND
   # (2) start and end at same location
   
-    
+  #browser() 
   # Get all "go" segments below time threshold
   cond1 <- filter(traj.summary, !is.stay, durations <= T.go) %>%
     select(traj.event)
   
+  # Make sure the short duration event is not first, last or only event:
+  cond1 %<>% filter(traj.event > 1 & traj.event < max(traj.summary$traj.event))
+  
+  if(nrow(cond1)>0){
   # Get the loc.id's of stays before and after each of the short "go" events
   stay.before <-
     filter(traj.summary, traj.event %in% (cond1$traj.event - 1)) %>% select(loc.id)
@@ -224,12 +234,18 @@ merge_temporal <- function(traj.summary, T.go, T.stay) {
   
   # Append the loc ID that the identified "go" points should be assigned to
   go.remove <- cbind(cond2, stay.before[stay.before == stay.after, ])
-  
+  } else {
+    go.remove <- cond1
+    }
   
   # Find "stay" events of duration below a time threshold and convert to "go":
   cond3 <- filter(traj.summary, is.stay, durations <= T.stay) %>%
     select(traj.event)
+  if(nrow(cond3)>0){
   stay.remove <- cbind(cond3,loc.id=0)
+  } else {
+    stay.remove <- cond3
+    }
   
   # Append the filtered stays to the filtered gos
   merge.temporal <- rbind(go.remove,stay.remove)

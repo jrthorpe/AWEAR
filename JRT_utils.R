@@ -84,7 +84,7 @@ restructure <- function(dat, userid, d.start, d.stop) {
   dat %<>% 
     mutate(intervals = c(NA,(diff(timestamp)/(60*60)))) %>% # intervals between readings in hours
     mutate(intervals.alt = c(NA,difftime(tail(timestamp,-1),head(timestamp,-1),units="mins"))) %>% # intervals between readings in hours
-    mutate(dates = as.character.Date(as.Date(dat$timestamp))) %>%  # dates
+    mutate(dates = as.Date(dat$timestamp,tz="CET")) %>%  # dates (changed from: as.character.Date(as.Date(dat$timestamp))))
     mutate(times = as.POSIXct(strftime(dat$timestamp, format="%H:%M:%S"), format="%H:%M:%S")) %>%  # add times for plotting time on y axis (note: to get the times in the right format, they are all just assigned the same date)
     mutate(index = c(1:nrow(dat))) # index for testing purposes
 
@@ -435,4 +435,10 @@ qualitychecks<- function(df){
 #   return(home)
 # }
 
+# From: https://stackoverflow.com/questions/34096162/dplyr-mutate-replace-on-a-subset-of-rows
+mutate_cond <- function(.data, condition, ..., envir = parent.frame()) {
+  condition <- eval(substitute(condition), .data, envir)
+  .data[condition, ] <- .data[condition, ] %>% mutate(...)
+  .data
+}
 
