@@ -67,10 +67,10 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 # Select user and period of interest:
 
 # select user:
-userid <- users$dean
+userid <- users$julia
 
 # set the period of interest:
-d.start <- as.POSIXct("2018-02-26") # yyyy-mm-dd 
+d.start <- as.POSIXct("2018-03-01") # yyyy-mm-dd 
 d.stop <- as.POSIXct("2018-03-28")
 
 # IMPORT AND RESTRUCTURE DATA ------------------------
@@ -140,7 +140,9 @@ gps.traj <- gps.log %>% group_by(dates) %>% do(get_trajectories(.,
                                                              dist.threshold = dist.threshold))
 
 traj.summary <- gps.traj %>% group_by(dates,traj.event) %>%
-  summarize(T.start = timestamp[1], T.end = timestamp[length(timestamp)], is.stay = median(is.stay), loc.id = mean(loc.id)) %>%
+  summarize(T.start = timestamp[1], T.end = timestamp[length(timestamp)], 
+            is.stay = median(is.stay), loc.id = mean(loc.id),
+            clat = ifelse(is.stay, mean(lat), NA), clon = ifelse(is.stay, mean(lon), NA)) %>%
   mutate(T.end = c(T.start[-1],T.end[length(T.end)])) %>%
   mutate(durations = difftime(T.end,T.start, units = "mins"))
 
@@ -150,7 +152,7 @@ traj.summary <- gps.traj %>% group_by(dates,traj.event) %>%
 #** Plot results for visual confirmation ----
 
 # basic plot
-plot_ly(gps.traj,
+plot_ly(gps.traj.day,
         x=~lon,
         y=~lat,
         type = "scatter",
@@ -158,7 +160,7 @@ plot_ly(gps.traj,
         color = ~as.factor(loc.id)) #or traj.event
 
 # locations/events overlaid over GPS trace for all datapoints:
-plot_ly(gps.traj,
+plot_ly(gps.traj.day,
         x=~lon, y=~lat,
         type = "scatter",
         mode = "lines+markers",
@@ -170,24 +172,60 @@ plot_ly(gps.traj,
             colors = "Set1")
 
 # map in background:
-mappoints <- gps.traj
+mappoints <- gps.traj.day
 coordinates(mappoints) <- ~ lon + lat
 proj4string(mappoints) <- "+init=epsg:4326"
 mapview(mappoints, zcol = "traj.event", burst = TRUE, map.types = "OpenStreetMap") #or loc.id
 
 # METRICS CALCULATION ================================================
 
-# -For each day/week: 
-#  .. Number of trips/stays
-#  .. Time spent out of / at home
-#  .. Distance covered in trajectories
-#  .. "Action Range"
-#  .. Plot the day: over time, plot a bar with "home", "transit", "location A", "location B" etc
-#  .. Work out how to annotate with the logbooks
+# Prepare inputs -----
 
-#** Spatial (Lifespace distance/area metrics) -----------------------
+# update home location based on stay centroids (can just be loc.id)
+home.stays <- cbind(traj.summary,
+             homedist = distGeo(home, 
+                                traj.summary %>% ungroup() %>% select(clon,clat), 
+                                a=6378137, f=1/298.257223563)) %>% 
+  group_by(dates) %>% filter(homedist==min(homedist, na.rm=TRUE) & homedist<30)
 
-# Minimum convex polygon
+home.updated <- c(mean(home.stays$clon),mean(home.stays$clat))
+#remove(home.stays)
+
+# add "distance to home" column for all points (in trajectories dataframe)
+gps.traj.prep <- ungroup(gps.traj) %>% 
+  mutate(homedist = distGeo(home.updated,
+                            ungroup(gps.traj) %>% select(lon,lat),
+                            a=6378137, f=1/298.257223563))
+
+# add required columns to the summaries by trajectory segment:
+# - stays: centroids (required for home location update above) -- done
+# - moves: furthest distance from home -- done
+# - stays: distance from home (between the 2 centroids) -- done
+# - stays: displacement from last segment -- done
+
+traj.summary.prep <- gps.traj.prep %>% group_by(dates,traj.event) %>%
+  summarize(T.start = timestamp[1], T.end = timestamp[length(timestamp)], 
+            is.stay = median(is.stay), loc.id = mean(loc.id),
+            clat = ifelse(is.stay, mean(lat), NA), clon = ifelse(is.stay, mean(lon), NA),
+            action.range = ifelse(is.stay,mean(homedist,na.rm=TRUE),max(homedist,na.rm=TRUE))
+            ) %>%
+  mutate(T.end = c(T.start[-1],T.end[length(T.end)])) %>%
+  mutate(durations = difftime(T.end,T.start, units = "mins"))
+
+displacements <- distGeo(ungroup(traj.summary.prep) %>% filter(is.stay==1) %>% select(clon,clat),
+          a=6378137, f=1/298.257223563)
+
+traj.summary.prep %<>% mutate(displacements = ifelse(is.stay==1,c(0,displacements),NA))
+
+# set first stay displacement of each day to zero
+traj.summary.prep %<>% group_by(dates,is.stay) %>% 
+  mutate(displacements = ifelse(is.stay==1 & row_number()==1, 0, displacements)) %>% ungroup()
+
+#traj.summary.prep[traj.summary.prep$first.stay,"displacements"] <- 0
+
+# Spatial (Lifespace distance/area metrics) -----------------------
+
+# **Minimum convex polygon  ------------
 # Reference: http://mgritts.github.io/2016/04/02/homerange-mcp/
 
 xy <- select(gps.log, lat, lon)
@@ -210,13 +248,13 @@ plot_ly(xy,
   add_trace(x=~mcp$lon, y=~mcp$lat, mode = "markers+lines", name = 'mcp')
 
 
-# Standard Deviation Elipse
+# **Standard Deviation Elipse  ------------
 # A function exists in python, need to find or write for R, eg using this explanation:
 # http://desktop.arcgis.com/en/arcmap/10.3/tools/spatial-statistics-toolbox/h-how-directional-distribution-standard-deviationa.htm
 
 
 
-# Action Range: (mean and max per period)
+# **Action Range: (mean and max per period) ------------
 # Straight line distance between home and most distal point of a journey
 
 # For each trajectory event (including both stays and moves):
@@ -224,18 +262,86 @@ plot_ly(xy,
 # In trajectory summary, store max
 # Could just do this for moves, since this is already done with centroids for the stays
 
+# Alternative: Mean distance from home (from Tung et al, 2014)
+# get a column with distance from home for all points in the dataset; calculate mean
 
-#** Temporal -----------------------
+
+# **Total distance covered (Canzian and Musolesi, 2015): ------------
+
+# Sum of distances from place to place throughout dataset
+# - get consecutive stay centroids
+# - calculate distances vector from place to place (in order visited)
+# - sum these by day
+
+# **Max distance between locations (Canzian and Musolesi, 2015): ------------
+
+# From same calculations for total distance, get max instead of sum
 
 
+# Temporal -----------------------
+
+
+
+# **Time at and away from home: (e.g. as percentage) ----------
+
+# Method from Tung et al, 2014:
+# get a column with distance from home for all points in the dataset
+# take all above 25m threshold to be out of home
+# get percentage time that points are over the threshold
+
+# My method:
+# sum durations of:
+# a) stays at home 
+# b) stays not home
+# c) journeys between stays
+# d) b+c for time out of home
+
+# Frequency based  -----------------------
+
+# **Number of unique places visited each day ---------
+# **Number of journeys between places each day (including trips starting and ending at same place)---------
+
+# **Number of "boundary crossings" based on the mobility baseline questionnaire (also spatial) ---------
+# based on the calculations for action range with distance for each trip and stay:
+# - group according to boundaries
+# - count how many in each range, eg 1-2km; 3-5km etc from home
+
+# Patterns  -----------------------
+
+# Need to investigate further, eg:
+# Routine index from (Canzian and Musolesi, 2015)
+# Any measures from the ICED paper
+# Papers shared by Sebastiano
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Code from earlier attempts:  -----------------------
 
 # get centroids of all stay locations:
 stay.centroids <- gps.traj %>% filter(loc.id > 0) %>% group_by(loc.id) %>% 
-  summarize(c.lon = mean(lon),c.lat = mean(lat))
+  summarize(clon = mean(lon),clat = mean(lat))
 
 # identify location id for home
-stay.centroids %<>% mutate(dist.home = distm(x=rev(home), 
-                                            y=select(stay.centroids,c.lon,c.lat), 
+stay.centroids %<>% mutate(homedist = distm(x=rev(home), 
+                                            y=select(stay.centroids,clon,clat), 
                                             fun=distGeo))
 
 cat("closest stay location to detected home is: ",

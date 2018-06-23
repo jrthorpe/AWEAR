@@ -9,7 +9,7 @@ find_home <- function(df,lat,lon){
   #browser()
   locations4 <- data.frame(lat4=round(df[,lat],4),lon4=round(df[,lon],4))
   loc.counts <- locations4 %>% count(lat4,lon4, sort=TRUE)
-  home <- as.numeric(select(loc.counts[1,],c(lat4,lon4)))
+  home <- as.numeric(select(loc.counts[1,],c(lon4,lat4)))
   
   return(home)
 }
@@ -60,6 +60,7 @@ get_trajectories <- function(df,
   # update traj.events based on revised loc.id column
   traj %<>% mutate(traj.event=get_events(loc.id))
   }
+  
   # --- end of mobility traces algorithm --- 
 
   
