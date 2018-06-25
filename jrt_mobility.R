@@ -14,6 +14,21 @@ find_home <- function(df,lat,lon){
   return(home)
 }
 
+update_home <- function(df,home,dist.threshold){
+  # df containing latitude, longitude and "is.stay" column
+  # home: current home estimation (based on find_home function)
+  # dist.threshold: distance in meters from current home coords within which a point is considered "home"
+
+  # update home location based on all stays that are home (stay points close to current home estimation)
+  df.tmp <- ungroup(df) %>% mutate(homedist = distGeo(home,
+                                                            ungroup(df) %>% select(lon,lat),
+                                                            a=6378137, f=1/298.257223563))
+  home.updated <- df.tmp %>% filter(is.stay==1,homedist<dist.threshold) %>%
+    select(lon, lat) %>% summarise_all(mean) %>% as.numeric()
+  
+  return(home.updated)
+}
+
 # TRAJECTORY EXTRACTION ("MOBILITY TRACES") // FULL STAY DETECTION ALGORITHM  ----
 get_trajectories <- function(df,
                             dT,
@@ -255,8 +270,6 @@ merge_temporal <- function(traj.summary, T.go, T.stay) {
   
 }
 
-
-
 # MINIMUM CONVEX POLYGON ----
 get_mcp <- function(locations, quantile) {
   # calculates minimum convex polygon from GPS data
@@ -283,5 +296,34 @@ get_mcp <- function(locations, quantile) {
   mcp.poly<-Polygon(mcp) # creates a polygon object with area attribute (access uing @area)
   
   return(list(mcp=mcp, mcp.poly=mcp.poly, centroid=centroid))
+}
+
+# SUMMARISE TRAJECTORIES ----
+summarise_trajectories <- function(gps.traj, dist.threshold) {
+  
+  # Required columns in gps.traj: dates, traj.event, timestamp, lat, lon, is.stay, homedist, durations
+  
+  # summarise by trajectory segment, with new columns for action range and "is.home" flag
+  traj.summary <- gps.traj %>% group_by(dates,traj.event) %>%
+    summarize(T.start = timestamp[1], T.end = timestamp[length(timestamp)], 
+              is.stay = median(is.stay), loc.id = mean(loc.id),
+              clat = ifelse(is.stay, mean(lat), NA), clon = ifelse(is.stay, mean(lon), NA),    # stays centroids
+              action.range = ifelse(is.stay,mean(homedist,na.rm=TRUE),max(homedist,na.rm=TRUE))# distance from home (furthest on move, average in stay)
+    ) %>%
+    mutate(T.end = c(T.start[-1],T.end[length(T.end)])) %>%
+    mutate(durations = difftime(T.end,T.start, units = "mins")) %>%
+    mutate(is.home = ifelse(is.stay==1 & action.range<dist.threshold, TRUE, FALSE))
+  
+  # get displacements between stays
+  tmp.displacements <- distGeo(ungroup(traj.summary) %>% filter(is.stay==1) %>% select(clon,clat),
+                               a=6378137, f=1/298.257223563)
+  traj.summary[,"displacements"] <- NA
+  traj.summary[traj.summary$is.stay==1,"displacements"] <- c(0,tmp.displacements); remove(tmp.displacements)
+  
+  # set first stay displacement of each day to zero
+  traj.summary %<>% group_by(dates,is.stay) %>% 
+    mutate(displacements = ifelse(is.stay==1 & row_number()==1, 0, displacements)) %>% ungroup()
+  
+  return(traj.summary)
 }
 

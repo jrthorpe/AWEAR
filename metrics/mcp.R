@@ -1,9 +1,9 @@
-get_mcp <- function(locations, quantile) {
+get_mcp <- function(lon,lat, quantile) {
   # calculates minimum convex polygon from GPS data
   #
   
    #browser() #for debugging
-  
+  locations <- data.frame(lon=lon,lat=lat)
   # make sure the input looks as expected (set of lat and lon data)
   
   # calculate distances from all points to centroid of the location data
@@ -22,5 +22,8 @@ get_mcp <- function(locations, quantile) {
   
   mcp.poly<-Polygon(mcp) # creates a polygon object with area attribute (access uing @area)
   
-  return(list(mcp=mcp, mcp.poly=mcp.poly, centroid=centroid))
+  mcp.poly.coords <- data.frame(mcp.poly@coords[,c("lon","lat")], row.names = NULL) #polygon coordinates in lat/lon
+  mcp.poly.area <- areaPolygon(mcp.poly.coords, a=6378137, f=1/298.257223563)/1000000 #polygon area in km2
+  
+  return(mcp.poly.area)
 }
