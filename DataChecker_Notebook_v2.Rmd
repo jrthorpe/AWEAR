@@ -50,6 +50,7 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
               verena = "a0c74a88-b293-4b31-92c0-967502b28132",
               agzam = "52152dda-0f54-46d1-affa-6dea85f840dc",
               anja = "36f9d061-c5e9-4f30-91b2-83351ff40288",
+              nina = "b12888e9-ee4f-42bc-9494-673e5a005e0e",
               #P01FA = "6321f7ef-a958-44ad-b8e5-5aa04bc004e1",
               P03JJ = "e9f44eb5-8962-4894-83c6-783025c6eaea",
               P06SS = "f9f24838-c844-42d4-8343-b20ebdd220f3",
@@ -67,8 +68,8 @@ users <- list(julia = "93a6d31c-e216-48d8-a9a2-f2f72362548d",
 userid <- users$julia
 
 # Set period of interest
-d.start <- as.POSIXct("2018-06-01") # yyyy-mm-dd 
-d.stop <- as.POSIXct("2018-06-14")
+d.start <- as.POSIXct("2018-06-15") # yyyy-mm-dd 
+d.stop <- as.POSIXct("2018-06-30")
 
 cat("This report is for user ", names(users[users==userid]), "for the time period from ", as.character(d.start), " to ", as.character(d.stop)) 
 
